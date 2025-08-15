@@ -23,6 +23,7 @@ const useDynamicForm = (model: FormModel) => {
       
       // 将 FormModel 的值同步到 AntD Form
       const values = model.getJSONData();
+      console.log(values);
       form.setFieldsValue(values);
     });
   }, [model]);
@@ -125,9 +126,6 @@ const Generator: React.FC<GeneratorProps> = ({ form, model, schema, displayField
 
   // 获取所有叶子节点路径
   const allLeafPaths = model.getAllLeafPaths();
-  console.dir(allLeafPaths);
-  
-
   return (
     <Card className="max-w-5xl mx-auto mt-6">
       <Divider />

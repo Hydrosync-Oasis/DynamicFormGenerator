@@ -46,202 +46,196 @@ const SwitchSelector: React.FC<{
   );
 };
 
-export default function DynamicFormDemo() {
-  // 定义表单Schema，展示嵌套结构
-  const formSchema: FormSchema = {
-    fields: [
-      {
-        key: 'userInfo',
-        label: '用户信息',
-        childrenFields: [
-          {
-            key: 'name',
-            label: '姓名',
-            control: 'input',
-            rules: [{ required: true, message: '请输入姓名' }],
-            itemProps: { placeholder: '请输入您的姓名' }
-          },
-          {
-            key: 'userType',
-            label: '用户类型',
-            control: 'radio',
-            options: [
-              { label: '个人用户', value: 'personal' },
-              { label: '企业用户', value: 'business' },
-              { label: 'VIP用户', value: 'vip' }
-            ],
-            rules: [{ required: true, message: '请选择用户类型' }]
+// 定义表单Schema，展示嵌套结构
+const formSchema: FormSchema = {
+  fields: [
+    {
+      key: 'userInfo',
+      label: '用户信息',
+      childrenFields: [
+        {
+          key: 'name',
+          label: '姓名',
+          control: 'input',
+          rules: [{ required: true, message: '请输入姓名' }],
+          itemProps: { placeholder: '请输入您的姓名' }
+        },
+        {
+          key: 'userType',
+          label: '用户类型',
+          control: 'radio',
+          options: [
+            { label: '个人用户', value: 'personal' },
+            { label: '企业用户', value: 'business' },
+            { label: 'VIP用户', value: 'vip' }
+          ],
+          rules: [{ required: true, message: '请选择用户类型' }]
+        }
+      ]
+    },
+    {
+      key: 'preferences',
+      label: '偏好设置',
+      childrenFields: [
+        {
+          key: 'interests',
+          label: '兴趣标签',
+          control: TagSelector,
+          options: [
+            { label: '技术', value: 'tech' },
+            { label: '设计', value: 'design' },
+            { label: '产品', value: 'product' },
+            { label: '市场', value: 'marketing' },
+            { label: '运营', value: 'operation' }
+          ]
+        },
+        {
+          key: 'notifications',
+          label: '接收通知',
+          control: SwitchSelector,
+          itemProps: { label: '启用邮件通知' }
+        }
+      ]
+    },
+    {
+      key: 'businessInfo',
+      label: '企业信息',
+      initialVisible: false, // 默认不显示
+      childrenFields: [
+        {
+          key: 'companyName',
+          label: '公司名称',
+          control: 'input',
+          rules: [{ required: true, message: '请输入公司名称' }],
+          itemProps: { placeholder: '请输入公司名称' }
+        },
+        {
+          key: 'industry',
+          label: '所属行业',
+          control: 'radio',
+          options: [
+            { label: '互联网', value: 'internet' },
+            { label: '金融', value: 'finance' },
+            { label: '教育', value: 'education' },
+            { label: '制造业', value: 'manufacturing' },
+            { label: '其他', value: 'other' }
+          ]
+        }
+      ]
+    },
+    {
+      key: 'vipInfo',
+      label: 'VIP信息',
+      initialVisible: false,
+      childrenFields: [
+        {
+          key: 'vipLevel',
+          label: 'VIP等级',
+          control: 'radio',
+          options: [
+            { label: '银卡', value: 'silver' },
+            { label: '金卡', value: 'gold' },
+            { label: '钻石', value: 'diamond' }
+          ]
+        },
+        {
+          key: 'privileges',
+          label: '特权选择',
+          control: TagSelector,
+          options: [
+            { label: '优先客服', value: 'priority_support' },
+            { label: '专属折扣', value: 'exclusive_discount' },
+            { label: '生日礼品', value: 'birthday_gift' },
+            { label: '免费升级', value: 'free_upgrade' }
+          ]
+        }
+      ]
+    },
+    {
+      key: 'additionalInfo',
+      label: '附加信息',
+      childrenFields: [
+        {
+          key: 'comments',
+          label: '备注',
+          control: 'input',
+          itemProps: {
+            placeholder: '请输入备注信息',
+            type: 'textarea',
+            rows: 3
           }
-        ]
-      },
-      {
-        key: 'preferences',
-        label: '偏好设置',
-        childrenFields: [
-          {
-            key: 'interests',
-            label: '兴趣标签',
-            control: TagSelector,
-            options: [
-              { label: '技术', value: 'tech' },
-              { label: '设计', value: 'design' },
-              { label: '产品', value: 'product' },
-              { label: '市场', value: 'marketing' },
-              { label: '运营', value: 'operation' }
-            ]
-          },
-          {
-            key: 'notifications',
-            label: '接收通知',
-            control: SwitchSelector,
-            itemProps: { label: '启用邮件通知' }
-          }
-        ]
-      },
-      {
-        key: 'businessInfo',
-        label: '企业信息',
-        initialVisible: false, // 默认不显示
-        childrenFields: [
-          {
-            key: 'companyName',
-            label: '公司名称',
-            control: 'input',
-            rules: [{ required: true, message: '请输入公司名称' }],
-            itemProps: { placeholder: '请输入公司名称' }
-          },
-          {
-            key: 'industry',
-            label: '所属行业',
-            control: 'radio',
-            options: [
-              { label: '互联网', value: 'internet' },
-              { label: '金融', value: 'finance' },
-              { label: '教育', value: 'education' },
-              { label: '制造业', value: 'manufacturing' },
-              { label: '其他', value: 'other' }
-            ]
-          }
-        ]
-      },
-      {
-        key: 'vipInfo',
-        label: 'VIP信息',
-        initialVisible: false,
-        childrenFields: [
-          {
-            key: 'vipLevel',
-            label: 'VIP等级',
-            control: 'radio',
-            options: [
-              { label: '银卡', value: 'silver' },
-              { label: '金卡', value: 'gold' },
-              { label: '钻石', value: 'diamond' }
-            ]
-          },
-          {
-            key: 'privileges',
-            label: '特权选择',
-            control: TagSelector,
-            options: [
-              { label: '优先客服', value: 'priority_support' },
-              { label: '专属折扣', value: 'exclusive_discount' },
-              { label: '生日礼品', value: 'birthday_gift' },
-              { label: '免费升级', value: 'free_upgrade' }
-            ]
-          }
-        ]
-      },
-      {
-        key: 'additionalInfo',
-        label: '附加信息',
-        childrenFields: [
-          {
-            key: 'comments',
-            label: '备注',
-            control: 'input',
-            itemProps: { 
-              placeholder: '请输入备注信息',
-              type: 'textarea',
-              rows: 3
-            }
-          }
-        ]
-      }
-    ]
-  };
+        }
+      ]
+    }
+  ]
+};
+  const model = new FormModel(formSchema);
 
-  // 创建表单模型
-  const [model] = React.useState(() => {
-    const formModel = new FormModel(formSchema);
-    
-    // 注册响应式规则：根据用户类型显示不同的信息区块
-    formModel.registerRule(({ get, set }) => {
-      const userType = get(['userInfo', 'userType']);
-      
-      // 当选择企业用户时，显示企业信息区块
-      if (userType === 'business') {
-        set(['businessInfo'], 'visible', true);
-        set(['vipInfo'], 'visible', false);
-        // 设置警告提示
-        set(['businessInfo', 'companyName'], 'alertTip', '企业用户需要填写公司信息');
-      } 
-      // 当选择VIP用户时，显示VIP信息区块
-      else if (userType === 'vip') {
-        set(['vipInfo'], 'visible', true);
-        set(['businessInfo'], 'visible', false);
-        // 设置提示信息
-        set(['vipInfo', 'vipLevel'], 'alertTip', 'VIP用户享有专属特权');
-      } 
-      // 个人用户隐藏企业和VIP信息
-      else {
-        set(['businessInfo'], 'visible', false);
-        set(['vipInfo'], 'visible', false);
-      }
-    });
+  // 注册响应式规则：根据用户类型显示不同的信息区块
+  model.registerRule(({ get, set }) => {
+    const userType = get(['userInfo', 'userType']);
 
-    // 注册另一个规则：根据VIP等级动态更新特权选项
-    formModel.registerRule(({ get, set }) => {
-      const vipLevel = get(['vipInfo', 'vipLevel']);
-      
-      if (vipLevel === 'silver') {
-        set(['vipInfo', 'privileges'], 'options', [
-          { label: '优先客服', value: 'priority_support' },
-          { label: '专属折扣', value: 'exclusive_discount' }
-        ]);
-      } else if (vipLevel === 'gold') {
-        set(['vipInfo', 'privileges'], 'options', [
-          { label: '优先客服', value: 'priority_support' },
-          { label: '专属折扣', value: 'exclusive_discount' },
-          { label: '生日礼品', value: 'birthday_gift' }
-        ]);
-      } else if (vipLevel === 'diamond') {
-        set(['vipInfo', 'privileges'], 'options', [
-          { label: '优先客服', value: 'priority_support' },
-          { label: '专属折扣', value: 'exclusive_discount' },
-          { label: '生日礼品', value: 'birthday_gift' },
-          { label: '免费升级', value: 'free_upgrade' }
-        ]);
-      }
-    });
-
-    // 注册规则：当启用通知时，设置兴趣标签为必填
-    formModel.registerRule(({ get, set }) => {
-      const notifications = get(['preferences', 'notifications']);
-      
-      if (notifications) {
-        set(['preferences', 'interests'], 'alertTip', '启用通知后，请选择您的兴趣标签以获得精准推送');
-      } else {
-        set(['preferences', 'interests'], 'alertTip', undefined);
-      }
-    });
-
-    // 初始化执行所有规则
-    formModel.runAllRules();
-    
-    return formModel;
+    // 当选择企业用户时，显示企业信息区块
+    if (userType === 'business') {
+      set(['businessInfo'], 'visible', true);
+      set(['vipInfo'], 'visible', false);
+      // 设置警告提示
+      set(['businessInfo', 'companyName'], 'alertTip', '企业用户需要填写公司信息');
+    }
+    // 当选择VIP用户时，显示VIP信息区块
+    else if (userType === 'vip') {
+      set(['vipInfo'], 'visible', true);
+      set(['businessInfo'], 'visible', false);
+      // 设置提示信息
+      set(['vipInfo', 'vipLevel'], 'alertTip', 'VIP用户享有专属特权');
+    }
+    // 个人用户隐藏企业和VIP信息
+    else {
+      set(['businessInfo'], 'visible', false);
+      set(['vipInfo'], 'visible', false);
+    }
   });
 
+  // 注册另一个规则：根据VIP等级动态更新特权选项
+  model.registerRule(({ get, set }) => {
+    const vipLevel = get(['vipInfo', 'vipLevel']);
+
+    if (vipLevel === 'silver') {
+      set(['vipInfo', 'privileges'], 'options', [
+        { label: '优先客服', value: 'priority_support' },
+        { label: '专属折扣', value: 'exclusive_discount' }
+      ]);
+    } else if (vipLevel === 'gold') {
+      set(['vipInfo', 'privileges'], 'options', [
+        { label: '优先客服', value: 'priority_support' },
+        { label: '专属折扣', value: 'exclusive_discount' },
+        { label: '生日礼品', value: 'birthday_gift' }
+      ]);
+    } else if (vipLevel === 'diamond') {
+      set(['vipInfo', 'privileges'], 'options', [
+        { label: '优先客服', value: 'priority_support' },
+        { label: '专属折扣', value: 'exclusive_discount' },
+        { label: '生日礼品', value: 'birthday_gift' },
+        { label: '免费升级', value: 'free_upgrade' }
+      ]);
+    }
+  });
+
+  // 注册规则：当启用通知时，设置兴趣标签为必填
+  model.registerRule(({ get, set }) => {
+    const notifications = get(['preferences', 'notifications']);
+
+    if (notifications) {
+      set(['preferences', 'interests'], 'alertTip', '启用通知后，请选择您的兴趣标签以获得精准推送');
+    } else {
+      set(['preferences', 'interests'], 'alertTip', undefined);
+    }
+  });
+
+  // 初始化执行所有规则
+  model.runAllRules();
+export default function DynamicFormDemo() {
+  // 创建表单模型
   const [form] = useDynamicForm(model);
 
   // 获取要显示的字段路径（所有叶子节点）
@@ -250,7 +244,7 @@ export default function DynamicFormDemo() {
   const handleFinish = (values: Record<string, FieldValue>) => {
     console.log('表单提交值:', values);
     console.log('内部模型数据:', model.getJSONData());
-    
+
     // 这里可以处理表单提交逻辑
     alert('表单提交成功！请查看控制台输出。');
   };
@@ -268,13 +262,13 @@ export default function DynamicFormDemo() {
   const handleBatchOperations = () => {
     // 批量隐藏偏好设置下的所有字段
     model.set(['preferences'], 'visible', false);
-    
+
     setTimeout(() => {
       // 2秒后重新显示
       model.set(['preferences'], 'visible', true);
       alert('批量操作演示完成！偏好设置区块已重新显示');
     }, 2000);
-    
+
     alert('批量隐藏偏好设置区块，2秒后将重新显示');
   };
 
@@ -302,7 +296,7 @@ export default function DynamicFormDemo() {
           <li><strong>批量设置：</strong>支持对非叶子节点进行批量设置，自动应用到所有子叶子节点</li>
           <li><strong>警告提示：</strong>支持动态显示字段相关的提示信息</li>
         </ul>
-        
+
         <div style={{ marginTop: '16px' }}>
           <strong>操作说明：</strong>
           <ol>
@@ -315,7 +309,7 @@ export default function DynamicFormDemo() {
         </div>
 
         <Divider />
-        
+
         <div style={{ marginBottom: '16px' }}>
           <strong>批量操作演示：</strong>
           <div style={{ marginTop: '8px' }}>
@@ -329,8 +323,8 @@ export default function DynamicFormDemo() {
               <Button type="dashed" onClick={handleClearBatchAlertTips}>
                 批量清除企业信息警告提示
               </Button>
-              <Button 
-                type="dashed" 
+              <Button
+                type="dashed"
                 onClick={() => {
                   // 先显示企业信息区块
                   model.set(['businessInfo'], 'visible', true);
@@ -356,7 +350,7 @@ export default function DynamicFormDemo() {
         form={form}
         onFinish={handleFinish}
       />
-      
+
       <Card style={{ marginTop: '20px' }}>
         <div style={{ textAlign: 'center', gap: '12px', display: 'flex', justifyContent: 'center' }}>
           <Button type="primary" onClick={() => form.submit()}>
@@ -365,8 +359,8 @@ export default function DynamicFormDemo() {
           <Button onClick={handleReset}>
             重置表单
           </Button>
-          <Button 
-            type="dashed" 
+          <Button
+            type="dashed"
             onClick={() => {
               console.log('当前表单模型快照:', model.getSnapshot());
               console.log('当前表单JSON数据:', model.getJSONData());
