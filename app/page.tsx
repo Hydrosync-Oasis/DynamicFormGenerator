@@ -4,7 +4,6 @@ import React from 'react';
 import { Button, Select, Switch, Card, Tag, Space, Divider } from 'antd';
 import { FormModel, FormSchema, FieldValue } from '../utils/structures';
 import { Generator, useDynamicForm } from '../utils/generator';
-import type { RuleItem } from 'async-validator';
 
 // 自定义组件示例：带标签的选择器
 const TagSelector: React.FC<{
@@ -22,13 +21,15 @@ const TagSelector: React.FC<{
         style={{ width: '100%' }}
         options={options}
       />
-      <div style={{ marginTop: 8 }}>
-        {value.map(tag => (
-          <Tag key={tag} color="blue" style={{ margin: '2px' }}>
-            {options.find(opt => opt.value === tag)?.label || tag}
-          </Tag>
-        ))}
-      </div>
+      { (value && value.length > 0) &&
+        <div style={{ marginTop: 8 }}>
+          {value.map(tag => (
+            <Tag key={tag} color="blue" style={{ margin: '2px' }}>
+              {options.find(opt => opt.value === tag)?.label || tag}
+            </Tag>
+          ))}
+        </div>
+      }
     </div>
   );
 };
@@ -81,6 +82,7 @@ const formSchema: FormSchema = {
         {
           key: 'interests',
           label: '兴趣标签',
+          rules: [{ min: 2, type: 'array', message: 'must be greater than 2' }],
           control: TagSelector,
           options: [
             { label: '技术', value: 'tech' },
@@ -93,6 +95,7 @@ const formSchema: FormSchema = {
         {
           key: 'notifications',
           label: '接收通知',
+          type: 'boolean',
           control: SwitchSelector,
           itemProps: { label: '启用邮件通知' }
         }
@@ -159,6 +162,7 @@ const formSchema: FormSchema = {
         {
           key: 'comments',
           label: '备注',
+          type: 'string',
           control: 'input',
           itemProps: {
             placeholder: '请输入备注信息',
@@ -237,7 +241,7 @@ model.registerRule(({ get, set }) => {
 model.runAllRules();
 export default function DynamicFormDemo() {
   // 创建表单模型
-  const [form] = useDynamicForm(model);
+  const form = useDynamicForm(model);
 
   // 获取要显示的字段路径（所有叶子节点）
   const displayFields = model.getAllLeafPaths();
@@ -251,12 +255,12 @@ export default function DynamicFormDemo() {
   };
 
   const handleReset = () => {
-    form.resetFields();
-    // 重置模型状态
-    const allLeafPaths = model.getAllLeafPaths();
-    allLeafPaths.forEach(path => {
-      model.set(path, 'value', undefined);
-    });
+    // form.resetFields();
+    // // 重置模型状态
+    // const allLeafPaths = model.getAllLeafPaths();
+    // allLeafPaths.forEach(path => {
+    //   model.set(path, 'value', undefined);
+    // });
   };
 
   // 演示批量设置功能的按钮
@@ -348,14 +352,14 @@ export default function DynamicFormDemo() {
         model={model}
         schema={formSchema}
         displayFields={displayFields}
-        form={form}
+        //form={form}
         onFinish={handleFinish}
       />
 
       <Card style={{ marginTop: '20px' }}>
         <div style={{ textAlign: 'center', gap: '12px', display: 'flex', justifyContent: 'center' }}>
           <Button type="primary" onClick={() => {
-            model.validateAllField().then((message) => {
+            model.validateAllFields().then((message) => {
               console.log(message);
             })
           }}>

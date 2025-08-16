@@ -1,85 +1,77 @@
-import { Form, ConfigProvider, Divider, Alert, Card, Col, Radio, Row, Space, Input, FormInstance } from "antd";
+import { ConfigProvider, Divider, Alert, Card, Col, Radio, Row, Space, Input } from "antd";
 import React, { useState, useEffect, ComponentType } from "react";
 import { FieldPath, FieldSchema, FieldValue, FormModel, FormSchema, FieldWithStateSchema } from "./structures";
-import { Rule } from "async-validator";
-import type { ValidateError } from 'async-validator';
+import type { ValidateError, Values } from 'async-validator';
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 interface GeneratorProps {
   model: FormModel;
   schema: FormSchema;
-  // stepsLayout: Array<{ title: string; fieldKeys: FieldKey[] }>; // 多步骤的二维布局（这里按步来）
   displayFields: FieldPath[];
-  form: FormInstance<any>;
-  onFinish: (values: Record<string, FieldValue>) => void;
+  onFinish?: (values: Record<string, FieldValue>) => void;
 }
 
 /** 自定义表单生成器的hook */
 interface DynamicFormHook {
-  submit: () => any;
+  submit: () => Promise<Values>;
   getFieldValue: (path: FieldPath) => any;
   setFieldValue: (path: FieldPath, value: FieldValue) => void;
   setFieldsValue: (value: any) => void;
-  validateFieldValue: (path: FieldPath) => ValidateError;
-  validate: () => ValidateError;
+  validateFieldValue: (path: FieldPath) => Promise<Values>;
+  validate: () => Promise<Values>;
 }
 
 const useDynamicForm2 = (model: FormModel) => {
   const [, force] = useState({});
   useEffect(() => {
     model.subscribe(() => {
-      force({});
-    }
-    )
-  });
-}
-
-// 即将更换成完全自定义的hook，不使用AntD的数据管理
-const useDynamicForm = (model: FormModel) => {
-  // hook的意义：触发更新
-  const [, force] = useState({});
-  const [form] = Form.useForm();
-  useEffect(() => {
-    model.subscribe(() => {
-      force({});
-      
-      // 将 FormModel 的值同步到 AntD Form
-      const values = model.getJSONData();
-      form.setFieldsValue(values);
+      force({}); // 响应式的最终触发方式
     });
   }, [model]);
 
-  return [form];
-}
-
-const Generator: React.FC<GeneratorProps> = ({ form, model, schema, displayFields, onFinish }) => {
-  // 将内部值灌进 AntD，以保持受控（演示用，每次渲染同步一次）
-  const snapshot = model.getSnapshot();
-  
-  // 递归获取所有字段的值
-  const getAllFieldValues = (nodes: FieldWithStateSchema[]): Record<string, any> => {
-    let values: Record<string, any> = {};
-    
-    nodes.forEach(node => {
-      // 只处理叶子节点的值
-      if (node.children.length === 0) {
-        // 使用完整路径作为键
-        const pathKey = node.path.join('.');
-        values[pathKey] = node.state!.value;
-      } else {
-        // 递归处理子节点
-        const childValues = getAllFieldValues(node.children);
-        values = { ...values, ...childValues };
-      }
-    });
-    
-    return values;
+  const hook: DynamicFormHook = {
+    validate: () => {
+      return model.validateAllFields();
+    },
+    validateFieldValue: (path: FieldPath) => {
+      return model.validateField(path);
+    },
+    submit: async () => {
+      return await model.validateAllFields();
+    },
+    getFieldValue: (path: FieldPath) => {
+      return model.get(path, 'value');
+    },
+    setFieldValue: (path: FieldPath, value: FieldValue) => {
+      model.set(path, 'value', value);
+    },
+    setFieldsValue: (values: any) => {
+      // 递归设置多个字段的值
+      const setNestedValues = (obj: Record<string, any>, currentPath: FieldPath = []) => {
+        Object.entries(obj).forEach(([key, value]) => {
+          const path = [...currentPath, key];
+          if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            setNestedValues(value, path);
+          } else {
+            model.set(path, 'value', value);
+          }
+        });
+      };
+      setNestedValues(values);
+    }
   };
-  
-  React.useEffect(() => {
-    const values = getAllFieldValues(snapshot);
-    form.setFieldsValue(values);
-  }, [form, snapshot]);
+
+  return hook;
+};
+
+const Generator: React.FC<GeneratorProps> = ({ model, displayFields, onFinish }) => {
+  // 响应式更新
+  const [, force] = useState({});
+  useEffect(() => {
+    model.subscribe(() => {
+      force({});
+    });
+  }, [model]);
   
   // 递归渲染字段
   const renderField = (path: FieldPath): React.ReactNode => {
@@ -114,6 +106,15 @@ const Generator: React.FC<GeneratorProps> = ({ form, model, schema, displayField
     if (!node.state) {
       throw new Error('non-leaf node')
     }
+
+    // 处理字段值变化的回调
+    const handleChange = (value: FieldValue) => {
+      model.set(path, 'value', value);
+      // 可选：实时验证
+      model.validateField(path).catch(() => {
+        // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
+      });
+    };
     
     return (
       <React.Fragment key={path.join('/')}>
@@ -122,27 +123,63 @@ const Generator: React.FC<GeneratorProps> = ({ form, model, schema, displayField
             {node.state.alertTip && <Alert message={node.state.alertTip} type='warning' />}
           </Col>
         </Row>
-        <Form.Item 
-          name={path} 
-          label={label} 
-          // rules={rules ? [rules] : [{ required: true, message: "必填" }] as Rule[]}
-        >
-          {/* 三选一逻辑：自定义组件 > 控件类型(input/radio) */}
-          {CustomComponent ? (
-            // @ts-ignore
-            <CustomComponent 
-              value={node.state.value}
-              options={node.state.options || options} 
-              {...itemProps} 
-            />
-          ) : control === "input" ? (
-            <Input {...itemProps} value={node.state.value}/>
-          ) : control === "radio" ? (
-            <Radio.Group value={node.state.value} options={node.state.options || options} />
-          ) : null}
-        </Form.Item>
+        {/* 自定义表单项布局 */}
+        <div style={{ marginBottom: '0px' }}>
+          <Row align="middle">
+            <Col span={4} style={{ textAlign: 'right', paddingRight: '8px', lineHeight: '32px' }}>
+              <label htmlFor={path.join('/')} style={{ color: '#000000d9' }}>{label}:</label>
+            </Col>
+            <Col span={20}>
+              {/* 三选一逻辑：自定义组件 > 控件类型(input/radio) */}
+              <div id={path.join('/')}>
+                {CustomComponent ? (
+                  <CustomComponent
+                    value={node.state.value}
+                    onChange={handleChange}
+                    options={node.state.options || options}
+                    {...itemProps}
+                  />
+                ) : control === "input" ? (
+                  <Input
+                    {...itemProps}
+                    value={node.state.value}
+                    onChange={(e) => handleChange(e.target.value)}
+                  />
+                ) : control === "radio" ? (
+                  <Radio.Group
+                    value={node.state.value}
+                    options={node.state.options || options}
+                    onChange={(e) => handleChange(e.target.value)}
+                  />
+                ) : null}
+
+              </div>
+            </Col>
+          </Row>
+        </div>
+        {/* 错误信息显示区域 */}
+        { node.state.errorMessage &&
+          <Row>
+            <Col offset={4} span={20}>
+              <div style={{ color: '#ff4d4f', fontSize: '13px'}}>
+                {node.state.errorMessage}
+              </div>
+            </Col>
+          </Row>}
       </React.Fragment>
     );
+  };
+
+  // 处理表单提交
+  const handleSubmit = async () => {
+    try {
+      const values = await model.validateAllFields();
+      if (onFinish) {
+        onFinish(model.getJSONData());
+      }
+    } catch (error) {
+      console.log('Form validation failed:', error);
+    }
   };
 
   // 获取所有叶子节点路径
@@ -155,51 +192,38 @@ const Generator: React.FC<GeneratorProps> = ({ form, model, schema, displayField
           components: {
             Alert: {
               defaultPadding: '2px 7px' 
-            },
-            Form: {
-              itemMarginBottom: 3
             }
           },
           token: { borderRadiusLG: 3, borderRadius: 2 }
         }}
       >
-        <Form
-          form={form}
-          // layout="vertical"
-          labelCol={{ span: 4 }}
-          wrapperCol={{ span: 20 }}
-          onValuesChange={(changed) => {
-            // 递归遍历changed对象
-            const processChangedValues = (changedObj: Record<string, any>, currentPath: FieldPath = []) => {
-              Object.entries(changedObj).forEach(([key, value]) => {
-                // 构建当前路径
-                const path = [...currentPath, key];
-                
-                // 检查当前路径是否在叶子节点路径列表中
-                const isLeafPath = allLeafPaths.some(leafPath =>
-                  leafPath.length === path.length &&
-                  leafPath.every((segment, i) => segment === path[i])
-                );
-
-                // 如果是叶子节点路径，则更新该字段
-                if (isLeafPath) {
-                  model.set(path, 'value', value as FieldValue);
-                } else {
-                  processChangedValues(value, path);
-                }
-              });
-            };
-            
-            // 处理changed对象
-            processChangedValues(changed);
-          }}
-          onFinish={onFinish}
-        >
-          <Space direction="vertical" style={{ width: "100%" }}>
+        <div style={{ padding: '24px 0' }}>
+          <Space size="small" direction="vertical" style={{ width: "100%" }}>
             {displayFields.map(path => renderField(Array.isArray(path) ? path : [path]))}
           </Space>
+          
+          {onFinish && (
+            <div style={{ marginTop: '24px', textAlign: 'center' }}>
+              <button 
+                type="button"
+                onClick={handleSubmit}
+                style={{
+                  backgroundColor: '#1890ff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                提交
+              </button>
+            </div>
+          )}
+          
           <Divider />
-        </Form>
+        </div>
       </ConfigProvider>
       <Divider />
       <Alert
@@ -220,7 +244,7 @@ const Generator: React.FC<GeneratorProps> = ({ form, model, schema, displayField
 };
 
 export {
-  useDynamicForm,
+  useDynamicForm2 as useDynamicForm,
   Generator,
 }
 

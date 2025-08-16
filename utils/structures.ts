@@ -1,4 +1,3 @@
-
 /**
 
 目前的表单完成情况：
@@ -11,7 +10,7 @@
  */
 
 // ----------------------------- 内部模型层 -----------------------------
-import Schema, { Rule, RuleItem, Rules } from "async-validator";
+import Schema, { RuleItem, ValidateError } from "async-validator";
 import { ComponentType } from "react";
 
 type FieldKey = string;
@@ -25,6 +24,7 @@ type ControlType = "input" | "radio"
 interface FieldSchema {
   key: FieldKey;
   label?: string;
+  type?: RuleItem['type'];
   control?: ControlType;
   // 对于枚举型的字段组件：提供 options
   options?: Array<{ label: string; value: string | number | boolean }>;
@@ -43,20 +43,8 @@ interface FieldWithStateSchema {
   key: FieldKey;
   path: FieldPath;
   state?: FieldState;
-  schemaData?: {
-    label?: string,
-    control?: ControlType,
-    // 对于枚举型的字段组件：提供 options
-    options: Array<{ label: string; value: string | number | boolean }>,
-    // 目前校验规则是静态的
-    rules: Rule;
-    // 初始可见性
-    initialVisible?: boolean;
-    // 单独给字段组件设置的prop
-    itemProps?: object;
-  };
+  schemaData?: Omit<FieldSchema, 'key'>;
   effect?: ReflectiveEffect[];
-
   // 递归
   children: FieldWithStateSchema[];
 }
@@ -67,6 +55,7 @@ interface FieldState {
   visible: boolean; // 是否显示，响应式触发
   options: Array<{ label: string; value: string | number | boolean }>;
   alertTip?: string;
+  errorMessage?: string;
 }
 
 interface FormSchema {
@@ -114,8 +103,9 @@ class FormModel {
           options: item.options ?? [],
           initialVisible: item.initialVisible,
           itemProps: item.itemProps,
-          rules: item.rules || [{ required: true, message: "必填" }] as Rule,
-          control: item.control
+          rules: item.rules || [],
+          control: item.control,
+          type: item.type
         },
         children: []
       }
@@ -141,7 +131,7 @@ class FormModel {
       childrenFields: schema.fields,
       key: ''
     }, this.compiledData, []);
-    
+
   }
 
   public findNodeByPath(path: FieldPath): FieldWithStateSchema | undefined {
@@ -194,8 +184,6 @@ class FormModel {
   set = (path: FieldPath, prop: keyof FieldState, value: any) => {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error('the field is not found:' + path);
-    // if (!node.state) throw new Error('node has no state: ' + path.join('.'));
-    
     // 如果是叶子节点（没有子节点），直接设置
     if (node.state && (!node.children || node.children.length === 0)) {
       node.state[prop] = value;
@@ -371,7 +359,33 @@ class FormModel {
     return result;
   }
 
-  validateAllField() {
+  validateField(path: FieldPath) {
+    const node = this.findNodeByPath(path);
+    const descriptor: any = {};
+    // 字段名(使用点分隔)
+    const fieldName = path.join('.');
+
+    descriptor[fieldName] = node?.schemaData?.rules;
+    const schema = new Schema(descriptor);
+
+    return schema.validate({
+      [path.join('.')]: node?.state?.value
+    }).then((values) => {
+      // 校验成功，清除错误信息
+      this.set(path, 'errorMessage', undefined);
+      return values;
+    }).catch((error) => {
+      // 校验失败，设置错误信息
+      if (error.fields && error.fields[fieldName]) {
+        const errors = error.fields[fieldName] as ValidateError[];
+        const errorMessage = errors.length > 0 ? errors[0].message : undefined;
+        this.set(path, 'errorMessage', errorMessage);
+      }
+      throw error;
+    });
+  }
+
+  validateAllFields() {
     const form = this.getJSONData();
     const sourceData = this.compiledData; // 需要转换成校验库认识的对象
     let descriptor: any = {};
@@ -381,14 +395,19 @@ class FormModel {
     }) => {
       // 复制孩子结点
       for (let i of sourceData.children) {
-        validator[i.key] = {};
         if (i.schemaData) { // 说明已经是叶子结点
-          validator[i.key] = i.schemaData.rules;
+          this.set(i.path, 'errorMessage', undefined);
           
-          validator[i.key][0]['type'] =
-            Array.isArray(i.state?.value) ?
-              'array' :
-              typeof i.state?.value
+          // 复制Rule
+          let rules: RuleItem[] = i.schemaData.rules! || [];
+          if (!rules.find((r) => { return r.type })) {
+            rules.push({
+              'type': i.schemaData.type,
+              message: `The type must be ${i.schemaData.type}, or you should specify a type.`
+            });
+          }
+
+          validator[i.key] = rules;
         } else {
           validator[i.key] = {
             type: 'object',
@@ -399,24 +418,38 @@ class FormModel {
       }
     }
 
-    // for (let i of sourceData) {
-    //   descriptor[i.key] = {};
-    //   if (i.schemaData) { // 说明已经是叶子结点
-    //     descriptor[i.key] = i.schemaData.rules;
-    //   } else {
-    //     descriptor[i.key] = {
-    //       type: 'object',
-    //       fields: {}
-    //     };
-    //     dfs(i, descriptor[i.key].fields);
-    //   }
-    // }
-
     dfs(sourceData, descriptor)
 
     console.log(descriptor);
+    
     const schema = new Schema(descriptor);
-    return schema.validate(form)
+    return schema.validate(form).catch((error) => {
+      const fields = error.fields;
+
+      // 先清空所有字段的错误信息
+      const allLeafPaths = this.getAllLeafPaths();
+      allLeafPaths.forEach(path => {
+        this.set(path, 'errorMessage', '');
+      });
+      
+      // 根据验证错误设置对应字段的错误信息
+      if (fields) {
+        Object.entries(fields).forEach(([fieldPath, errors]) => {
+          // 将用点分隔的字符串转换为路径数组
+          const path = fieldPath.split('.');
+          
+          // 获取第一个错误信息作为显示内容，确保类型安全
+          const errorArray = errors as ValidateError[];
+          const errorMessage = errorArray.length > 0 ? errorArray[0].message : undefined;
+          
+          // 设置字段的错误信息
+          this.set(path, 'errorMessage', errorMessage);
+        });
+      }
+      
+      // 重新抛出错误，保持原有的错误处理逻辑
+      throw error;
+    });
   }
 }
 
