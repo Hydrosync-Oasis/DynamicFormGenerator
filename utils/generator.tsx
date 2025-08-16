@@ -1,7 +1,8 @@
 import { Form, ConfigProvider, Divider, Alert, Card, Col, Radio, Row, Space, Input, FormInstance } from "antd";
 import React, { useState, useEffect, ComponentType } from "react";
 import { FieldPath, FieldSchema, FieldValue, FormModel, FormSchema, FieldWithStateSchema } from "./structures";
-import { Rule } from "antd/es/form";
+import { Rule } from "async-validator";
+import type { ValidateError } from 'async-validator';
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 interface GeneratorProps {
@@ -13,6 +14,27 @@ interface GeneratorProps {
   onFinish: (values: Record<string, FieldValue>) => void;
 }
 
+/** 自定义表单生成器的hook */
+interface DynamicFormHook {
+  submit: () => any;
+  getFieldValue: (path: FieldPath) => any;
+  setFieldValue: (path: FieldPath, value: FieldValue) => void;
+  setFieldsValue: (value: any) => void;
+  validateFieldValue: (path: FieldPath) => ValidateError;
+  validate: () => ValidateError;
+}
+
+const useDynamicForm2 = (model: FormModel) => {
+  const [, force] = useState({});
+  useEffect(() => {
+    model.subscribe(() => {
+      force({});
+    }
+    )
+  });
+}
+
+// 即将更换成完全自定义的hook，不使用AntD的数据管理
 const useDynamicForm = (model: FormModel) => {
   // hook的意义：触发更新
   const [, force] = useState({});
@@ -23,7 +45,6 @@ const useDynamicForm = (model: FormModel) => {
       
       // 将 FormModel 的值同步到 AntD Form
       const values = model.getJSONData();
-      console.log(values);
       form.setFieldsValue(values);
     });
   }, [model]);
@@ -79,7 +100,7 @@ const Generator: React.FC<GeneratorProps> = ({ form, model, schema, displayField
     }
     
     // 叶子节点才渲染UI
-    const { label, control, options, itemProps, rules } = node.schemaData;
+    const { label, control, options, itemProps, rules } = node.schemaData!;
     
     let CustomComponent: ComponentType<{
       value: FieldValue,
@@ -104,7 +125,7 @@ const Generator: React.FC<GeneratorProps> = ({ form, model, schema, displayField
         <Form.Item 
           name={path} 
           label={label} 
-          rules={rules || [{ required: true, message: "必填" }] as Rule[]}
+          // rules={rules ? [rules] : [{ required: true, message: "必填" }] as Rule[]}
         >
           {/* 三选一逻辑：自定义组件 > 控件类型(input/radio) */}
           {CustomComponent ? (

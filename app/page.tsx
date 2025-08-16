@@ -4,6 +4,7 @@ import React from 'react';
 import { Button, Select, Switch, Card, Tag, Space, Divider } from 'antd';
 import { FormModel, FormSchema, FieldValue } from '../utils/structures';
 import { Generator, useDynamicForm } from '../utils/generator';
+import type { RuleItem } from 'async-validator';
 
 // 自定义组件示例：带标签的选择器
 const TagSelector: React.FC<{
@@ -169,71 +170,71 @@ const formSchema: FormSchema = {
     }
   ]
 };
-  const model = new FormModel(formSchema);
+const model = new FormModel(formSchema);
 
-  // 注册响应式规则：根据用户类型显示不同的信息区块
-  model.registerRule(({ get, set }) => {
-    const userType = get(['userInfo', 'userType']);
+// 注册响应式规则：根据用户类型显示不同的信息区块
+model.registerRule(({ get, set }) => {
+  const userType = get(['userInfo', 'userType']);
 
-    // 当选择企业用户时，显示企业信息区块
-    if (userType === 'business') {
-      set(['businessInfo'], 'visible', true);
-      set(['vipInfo'], 'visible', false);
-      // 设置警告提示
-      set(['businessInfo', 'companyName'], 'alertTip', '企业用户需要填写公司信息');
-    }
-    // 当选择VIP用户时，显示VIP信息区块
-    else if (userType === 'vip') {
-      set(['vipInfo'], 'visible', true);
-      set(['businessInfo'], 'visible', false);
-      // 设置提示信息
-      set(['vipInfo', 'vipLevel'], 'alertTip', 'VIP用户享有专属特权');
-    }
-    // 个人用户隐藏企业和VIP信息
-    else {
-      set(['businessInfo'], 'visible', false);
-      set(['vipInfo'], 'visible', false);
-    }
-  });
+  // 当选择企业用户时，显示企业信息区块
+  if (userType === 'business') {
+    set(['businessInfo'], 'visible', true);
+    set(['vipInfo'], 'visible', false);
+    // 设置警告提示
+    set(['businessInfo', 'companyName'], 'alertTip', '企业用户需要填写公司信息');
+  }
+  // 当选择VIP用户时，显示VIP信息区块
+  else if (userType === 'vip') {
+    set(['vipInfo'], 'visible', true);
+    set(['businessInfo'], 'visible', false);
+    // 设置提示信息
+    set(['vipInfo', 'vipLevel'], 'alertTip', 'VIP用户享有专属特权');
+  }
+  // 个人用户隐藏企业和VIP信息
+  else {
+    set(['businessInfo'], 'visible', false);
+    set(['vipInfo'], 'visible', false);
+  }
+});
 
-  // 注册另一个规则：根据VIP等级动态更新特权选项
-  model.registerRule(({ get, set }) => {
-    const vipLevel = get(['vipInfo', 'vipLevel']);
+// 注册另一个规则：根据VIP等级动态更新特权选项
+model.registerRule(({ get, set }) => {
+  const vipLevel = get(['vipInfo', 'vipLevel']);
 
-    if (vipLevel === 'silver') {
-      set(['vipInfo', 'privileges'], 'options', [
-        { label: '优先客服', value: 'priority_support' },
-        { label: '专属折扣', value: 'exclusive_discount' }
-      ]);
-    } else if (vipLevel === 'gold') {
-      set(['vipInfo', 'privileges'], 'options', [
-        { label: '优先客服', value: 'priority_support' },
-        { label: '专属折扣', value: 'exclusive_discount' },
-        { label: '生日礼品', value: 'birthday_gift' }
-      ]);
-    } else if (vipLevel === 'diamond') {
-      set(['vipInfo', 'privileges'], 'options', [
-        { label: '优先客服', value: 'priority_support' },
-        { label: '专属折扣', value: 'exclusive_discount' },
-        { label: '生日礼品', value: 'birthday_gift' },
-        { label: '免费升级', value: 'free_upgrade' }
-      ]);
-    }
-  });
+  if (vipLevel === 'silver') {
+    set(['vipInfo', 'privileges'], 'options', [
+      { label: '优先客服', value: 'priority_support' },
+      { label: '专属折扣', value: 'exclusive_discount' }
+    ]);
+  } else if (vipLevel === 'gold') {
+    set(['vipInfo', 'privileges'], 'options', [
+      { label: '优先客服', value: 'priority_support' },
+      { label: '专属折扣', value: 'exclusive_discount' },
+      { label: '生日礼品', value: 'birthday_gift' }
+    ]);
+  } else if (vipLevel === 'diamond') {
+    set(['vipInfo', 'privileges'], 'options', [
+      { label: '优先客服', value: 'priority_support' },
+      { label: '专属折扣', value: 'exclusive_discount' },
+      { label: '生日礼品', value: 'birthday_gift' },
+      { label: '免费升级', value: 'free_upgrade' }
+    ]);
+  }
+});
 
-  // 注册规则：当启用通知时，设置兴趣标签为必填
-  model.registerRule(({ get, set }) => {
-    const notifications = get(['preferences', 'notifications']);
+// 注册规则：当启用通知时，设置兴趣标签为必填
+model.registerRule(({ get, set }) => {
+  const notifications = get(['preferences', 'notifications']);
 
-    if (notifications) {
-      set(['preferences', 'interests'], 'alertTip', '启用通知后，请选择您的兴趣标签以获得精准推送');
-    } else {
-      set(['preferences', 'interests'], 'alertTip', undefined);
-    }
-  });
+  if (notifications) {
+    set(['preferences', 'interests'], 'alertTip', '启用通知后，请选择您的兴趣标签以获得精准推送');
+  } else {
+    set(['preferences', 'interests'], 'alertTip', undefined);
+  }
+});
 
-  // 初始化执行所有规则
-  model.runAllRules();
+// 初始化执行所有规则
+model.runAllRules();
 export default function DynamicFormDemo() {
   // 创建表单模型
   const [form] = useDynamicForm(model);
@@ -353,7 +354,11 @@ export default function DynamicFormDemo() {
 
       <Card style={{ marginTop: '20px' }}>
         <div style={{ textAlign: 'center', gap: '12px', display: 'flex', justifyContent: 'center' }}>
-          <Button type="primary" onClick={() => form.submit()}>
+          <Button type="primary" onClick={() => {
+            model.validateAllField().then((message) => {
+              console.log(message);
+            })
+          }}>
             提交表单
           </Button>
           <Button onClick={handleReset}>

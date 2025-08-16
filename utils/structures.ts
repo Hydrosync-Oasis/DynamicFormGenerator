@@ -11,7 +11,7 @@
  */
 
 // ----------------------------- 内部模型层 -----------------------------
-import { Rule } from "antd/es/form";
+import Schema, { Rule, RuleItem, Rules } from "async-validator";
 import { ComponentType } from "react";
 
 type FieldKey = string;
@@ -28,7 +28,7 @@ interface FieldSchema {
   control?: ControlType;
   // 对于枚举型的字段组件：提供 options
   options?: Array<{ label: string; value: string | number | boolean }>;
-  rules?: Rule[];
+  rules?: RuleItem[];
   // 初始可见性
   initialVisible?: boolean;
   // 单独给字段组件设置的prop
@@ -38,16 +38,18 @@ interface FieldSchema {
   childrenFields?: FieldSchema[];
 }
 
+
 interface FieldWithStateSchema {
   key: FieldKey;
   path: FieldPath;
   state?: FieldState;
-  schemaData: {
+  schemaData?: {
     label?: string,
     control?: ControlType,
     // 对于枚举型的字段组件：提供 options
     options: Array<{ label: string; value: string | number | boolean }>,
-    rules?: Rule[];
+    // 目前校验规则是静态的
+    rules: Rule;
     // 初始可见性
     initialVisible?: boolean;
     // 单独给字段组件设置的prop
@@ -83,24 +85,26 @@ interface ReactiveRule {
 
 /** 内部对象：管理值与可见性、规则注册与触发 */
 class FormModel {
-  private schema: FormSchema;
-  private stateStructure: FieldWithStateSchema[];
+  private compiledData: FieldWithStateSchema;
 
   private listeners = new Set<(stateSchema: FieldWithStateSchema[]) => void>();
 
   private rules: ReactiveRule[] = [];
 
   constructor(schema: FormSchema, initialValues?: Record<FieldKey, FieldValue>) {
-    this.schema = schema;
     // schema是一个递归结构，接下来将schema转换为stateStructure
-    this.stateStructure = [];
+    // 此处使用虚拟根结点，用于简化代码，这样就不需要手动复制树的第一层了
+    this.compiledData = {
+      key: 'dummy-root',
+      path: ['dummy'],
+      children: []
+    };
 
     // 复制结点，从原始数据到内部带有State和Schema的结构化数据
-    const copyOneNode= (item: FieldSchema, path: FieldPath): FieldWithStateSchema =>  {
-      return {
+    const copyOneNode = (item: FieldSchema, path: FieldPath): FieldWithStateSchema => {
+      const res: FieldWithStateSchema = {
         key: item.key,
         path: path, //[...seenPath, item.key],
-        // 所有节点都有state，包括非叶子节点
         state: {
           visible: item.initialVisible ?? true,
           options: item.options ?? []
@@ -110,11 +114,19 @@ class FormModel {
           options: item.options ?? [],
           initialVisible: item.initialVisible,
           itemProps: item.itemProps,
-          rules: item.rules,
+          rules: item.rules || [{ required: true, message: "必填" }] as Rule,
           control: item.control
         },
         children: []
       }
+
+      if (item.childrenFields && item.childrenFields.length > 0) {
+        // 说明是嵌套字段，本身没有值
+        res.schemaData = undefined;
+        res.state = undefined;
+      }
+
+      return res;
     }
 
     const dfs = (schema: FieldSchema, structure: FieldWithStateSchema, seenPath: FieldPath) => {
@@ -125,18 +137,18 @@ class FormModel {
       }
     }
 
-    for (let item of schema.fields) {
-      const newNode = copyOneNode(item, [item.key])
-      dfs(item, newNode, [item.key]);
-      this.stateStructure.push(newNode);
-    }
+    dfs({
+      childrenFields: schema.fields,
+      key: ''
+    }, this.compiledData, []);
+    
   }
 
   public findNodeByPath(path: FieldPath): FieldWithStateSchema | undefined {
     if (path.length === 0) {
       throw new Error('不能查找顶层');
     }
-    let curObj: FieldWithStateSchema | undefined = this.stateStructure.find((x) => {
+    let curObj: FieldWithStateSchema | undefined = this.compiledData.children.find((x) => {
       return x.key === path[0]
     });
     if (!curObj) return undefined;
@@ -161,7 +173,7 @@ class FormModel {
 
   private notify() {
     for (const fn of this.listeners) fn(
-      this.stateStructure
+      this.compiledData.children
     );
   }
 
@@ -182,10 +194,10 @@ class FormModel {
   set = (path: FieldPath, prop: keyof FieldState, value: any) => {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error('the field is not found:' + path);
-    if (!node.state) throw new Error('node has no state: ' + path.join('.'));
+    // if (!node.state) throw new Error('node has no state: ' + path.join('.'));
     
     // 如果是叶子节点（没有子节点），直接设置
-    if (!node.children || node.children.length === 0) {
+    if (node.state && (!node.children || node.children.length === 0)) {
       node.state[prop] = value;
       
       // 值变化后，触发依赖该字段的规则
@@ -228,7 +240,7 @@ class FormModel {
   };
   
   getSnapshot(): FieldWithStateSchema[] {
-    return this.stateStructure;
+    return this.compiledData.children;
   }
 
   /** 注册规则 */
@@ -293,10 +305,7 @@ class FormModel {
     }
   }
 
-  /**
-   * 获取嵌套stateStructure中所有叶子节点的数据，并保持嵌套结构
-   * @returns 保持嵌套结构的数据对象
-   */
+
   /**
    * 获取所有叶子节点的路径数组
    * @returns 二维数组，每个内部数组代表一个叶子节点的完整路径
@@ -318,13 +327,17 @@ class FormModel {
     };
     
     // 处理顶层节点
-    this.stateStructure.forEach(node => {
+    this.compiledData.children.forEach(node => {
       collectLeafPaths(node);
     });
     
     return result;
   }
-
+  
+  /**
+   * 获取嵌套stateStructure中所有叶子节点的数据，并保持嵌套结构
+   * @returns 保持嵌套结构的数据对象
+   */
   getJSONData(): Record<string, any> {
     const result: Record<string, any> = {};
     
@@ -351,11 +364,59 @@ class FormModel {
     };
     
     // 处理顶层节点
-    this.stateStructure.forEach(node => {
+    this.compiledData.children.forEach(node => {
       processNode(node, result);
     });
     
     return result;
+  }
+
+  validateAllField() {
+    const form = this.getJSONData();
+    const sourceData = this.compiledData; // 需要转换成校验库认识的对象
+    let descriptor: any = {};
+
+    const dfs = (sourceData: FieldWithStateSchema, validator: {
+      [key: string]: any
+    }) => {
+      // 复制孩子结点
+      for (let i of sourceData.children) {
+        validator[i.key] = {};
+        if (i.schemaData) { // 说明已经是叶子结点
+          validator[i.key] = i.schemaData.rules;
+          
+          validator[i.key][0]['type'] =
+            Array.isArray(i.state?.value) ?
+              'array' :
+              typeof i.state?.value
+        } else {
+          validator[i.key] = {
+            type: 'object',
+            fields: {}
+          };
+          dfs(i, validator[i.key].fields);
+        }
+      }
+    }
+
+    // for (let i of sourceData) {
+    //   descriptor[i.key] = {};
+    //   if (i.schemaData) { // 说明已经是叶子结点
+    //     descriptor[i.key] = i.schemaData.rules;
+    //   } else {
+    //     descriptor[i.key] = {
+    //       type: 'object',
+    //       fields: {}
+    //     };
+    //     dfs(i, descriptor[i.key].fields);
+    //   }
+    // }
+
+    dfs(sourceData, descriptor)
+
+    console.log(descriptor);
+    const schema = new Schema(descriptor);
+    return schema.validate(form)
   }
 }
 
