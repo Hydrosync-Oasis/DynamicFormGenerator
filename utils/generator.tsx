@@ -1,7 +1,7 @@
 import { ConfigProvider, Divider, Alert, Card, Col, Radio, Row, Space, Input } from "antd";
 import React, { useState, useEffect, ComponentType } from "react";
-import { FieldPath, FieldSchema, FieldValue, FormModel, FormSchema, FieldWithStateSchema } from "./structures";
-import type { ValidateError, Values } from 'async-validator';
+import { FieldPath, FieldSchema, FieldValue, FormModel, FormSchema } from "./structures";
+import type { Values } from 'async-validator';
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 interface GeneratorProps {
@@ -17,8 +17,9 @@ interface DynamicFormHook {
   getFieldValue: (path: FieldPath) => any;
   setFieldValue: (path: FieldPath, value: FieldValue) => void;
   setFieldsValue: (value: any) => void;
-  validateFieldValue: (path: FieldPath) => Promise<Values>;
-  validate: () => Promise<Values>;
+  validateField: (path: FieldPath) => Promise<Values>;
+  validateFields: (paths: FieldPath[]) => Promise<Values>;
+  validateAllFields: (paths: FieldPath[]) => Promise<Values>;
 }
 
 const useDynamicForm2 = (model: FormModel) => {
@@ -30,10 +31,10 @@ const useDynamicForm2 = (model: FormModel) => {
   }, [model]);
 
   const hook: DynamicFormHook = {
-    validate: () => {
+    validateAllFields: () => {
       return model.validateAllFields();
     },
-    validateFieldValue: (path: FieldPath) => {
+    validateField: (path: FieldPath) => {
       return model.validateField(path);
     },
     submit: async () => {
@@ -58,7 +59,15 @@ const useDynamicForm2 = (model: FormModel) => {
         });
       };
       setNestedValues(values);
-    }
+    },
+    /** 只校验显示的字段 */
+    validateFields: (paths: FieldPath[]) => {
+      return model.validateFields(paths.filter(
+        (path) => {
+          return model.get(path, 'visible')
+        }
+      ));
+    },
   };
 
   return hook;
@@ -173,7 +182,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields, onFinish })
   // 处理表单提交
   const handleSubmit = async () => {
     try {
-      const values = await model.validateAllFields();
+      const values = await model.validateFields(displayFields);
       if (onFinish) {
         onFinish(model.getJSONData());
       }
@@ -182,8 +191,6 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields, onFinish })
     }
   };
 
-  // 获取所有叶子节点路径
-  const allLeafPaths = model.getAllLeafPaths();
   return (
     <Card className="max-w-5xl mx-auto mt-6">
       <Divider />

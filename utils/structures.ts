@@ -10,7 +10,7 @@
  */
 
 // ----------------------------- 内部模型层 -----------------------------
-import Schema, { RuleItem, ValidateError } from "async-validator";
+import Schema, { RuleItem, ValidateError, Values } from "async-validator";
 import { ComponentType } from "react";
 
 type FieldKey = string;
@@ -74,12 +74,16 @@ interface ReactiveRule {
 
 /** 内部对象：管理值与可见性、规则注册与触发 */
 class FormModel {
+  // 存放编译后的树状数据
   private compiledData: FieldWithStateSchema;
+  // 存放校验规则，只用给async-validators适配
+  private descriptor: Values;
 
   private listeners = new Set<(stateSchema: FieldWithStateSchema[]) => void>();
 
   private rules: ReactiveRule[] = [];
 
+  /** 做两件事：dfs构建编译后的节点，dfs构建用于给async-validator库使用的descriptor */
   constructor(schema: FormSchema, initialValues?: Record<FieldKey, FieldValue>) {
     // schema是一个递归结构，接下来将schema转换为stateStructure
     // 此处使用虚拟根结点，用于简化代码，这样就不需要手动复制树的第一层了
@@ -119,18 +123,55 @@ class FormModel {
       return res;
     }
 
-    const dfs = (schema: FieldSchema, structure: FieldWithStateSchema, seenPath: FieldPath) => {
+    const dfsForSchema = (schema: FieldSchema, structure: FieldWithStateSchema, seenPath: FieldPath) => {
       for (let item of schema.childrenFields || []) {
         const newNode: FieldWithStateSchema = copyOneNode(item, [...seenPath, item.key]);
-        dfs(item, newNode, [...seenPath, item.key]);
+        dfsForSchema(item, newNode, [...seenPath, item.key]);
         structure.children.push(newNode)
       }
     }
 
-    dfs({
+    dfsForSchema({
       childrenFields: schema.fields,
       key: ''
     }, this.compiledData, []);
+
+
+    // 构建validator
+
+    this.descriptor = {};
+
+    const dfsForValidator = (sourceData: FieldWithStateSchema, validator: {
+      [key: string]: any
+    }) => {
+      // 复制孩子结点
+      for (let i of sourceData.children) {
+        if (i.schemaData) { // 说明已经是叶子结点
+          this.set(i.path, 'errorMessage', undefined);
+          
+          // 复制Rule
+          let rules: RuleItem[] = i.schemaData.rules! || [];
+          if (!rules.find((r) => { return r.type }) && i.schemaData.type) {
+            rules.push({
+              'type': i.schemaData.type,
+              message: `The type must be ${i.schemaData.type}, or you should specify a type.`
+            });
+          }
+
+          validator[i.key] = rules;
+        } else {
+          validator[i.key] = {
+            type: 'object',
+            fields: {}
+          };
+          dfsForValidator(i, validator[i.key].fields);
+        }
+      }
+    }
+
+    dfsForValidator(this.compiledData, this.descriptor)
+
+    console.log(this.descriptor);
 
   }
 
@@ -161,6 +202,7 @@ class FormModel {
     return () => void this.listeners.delete(fn);
   }
 
+  // 触发更新
   private notify() {
     for (const fn of this.listeners) fn(
       this.compiledData.children
@@ -359,6 +401,21 @@ class FormModel {
     return result;
   }
 
+  validateFields(paths: FieldPath[]): Promise<Values> {
+    return this.validateFieldsHelper(paths);
+  }
+
+
+  /**
+   * 校验指定路径的表单字段。
+   *
+   * 该方法通过路径定位字段节点，构建基于字段规则的校验 schema，并校验当前字段值。
+   * 校验成功时会清除字段的错误信息，校验失败则设置错误信息。
+   * 方法返回一个 Promise，成功时返回校验结果，失败时抛出校验错误。
+   *
+   * @param path - 字段路径（字符串数组）。
+   * @returns Promise，成功返回校验值，失败抛出校验错误。
+   */
   validateField(path: FieldPath) {
     const node = this.findNodeByPath(path);
     const descriptor: any = {};
@@ -385,71 +442,48 @@ class FormModel {
     });
   }
 
-  validateAllFields() {
+  async validateFieldsHelper(paths?: FieldPath[]): Promise<Values> {
     const form = this.getJSONData();
-    const sourceData = this.compiledData; // 需要转换成校验库认识的对象
-    let descriptor: any = {};
-
-    const dfs = (sourceData: FieldWithStateSchema, validator: {
-      [key: string]: any
-    }) => {
-      // 复制孩子结点
-      for (let i of sourceData.children) {
-        if (i.schemaData) { // 说明已经是叶子结点
-          this.set(i.path, 'errorMessage', undefined);
-          
-          // 复制Rule
-          let rules: RuleItem[] = i.schemaData.rules! || [];
-          if (!rules.find((r) => { return r.type })) {
-            rules.push({
-              'type': i.schemaData.type,
-              message: `The type must be ${i.schemaData.type}, or you should specify a type.`
-            });
-          }
-
-          validator[i.key] = rules;
-        } else {
-          validator[i.key] = {
-            type: 'object',
-            fields: {}
-          };
-          dfs(i, validator[i.key].fields);
-        }
-      }
-    }
-
-    dfs(sourceData, descriptor)
-
-    console.log(descriptor);
     
-    const schema = new Schema(descriptor);
-    return schema.validate(form).catch((error) => {
-      const fields = error.fields;
+    // 直接拿validator
+    const schema = new Schema(this.descriptor);
+    // 根据是否有fields区分情况
+    
+    try {
+      return await schema.validate(form,
+        paths ? {
+          keys: paths.map((path) => path.join('.')),
+        }
+          : undefined);
+    } catch (error) {
+      const fields = (error as any).fields;
 
-      // 先清空所有字段的错误信息
-      const allLeafPaths = this.getAllLeafPaths();
-      allLeafPaths.forEach(path => {
-        this.set(path, 'errorMessage', '');
+      // 先清空传入的所有字段的错误信息
+      const allLeafPaths = paths ?? this.getAllLeafPaths();
+      allLeafPaths.forEach(path_1 => {
+        this.set(path_1, 'errorMessage', undefined);
       });
-      
+
       // 根据验证错误设置对应字段的错误信息
       if (fields) {
         Object.entries(fields).forEach(([fieldPath, errors]) => {
           // 将用点分隔的字符串转换为路径数组
-          const path = fieldPath.split('.');
-          
+          const path_3 = fieldPath.split('.');
+
           // 获取第一个错误信息作为显示内容，确保类型安全
           const errorArray = errors as ValidateError[];
           const errorMessage = errorArray.length > 0 ? errorArray[0].message : undefined;
-          
           // 设置字段的错误信息
-          this.set(path, 'errorMessage', errorMessage);
+          this.set(path_3, 'errorMessage', errorMessage);
         });
       }
-      
-      // 重新抛出错误，保持原有的错误处理逻辑
-      throw error;
-    });
+      console.log(this.compiledData);
+      return (error as any).fields;
+    }
+  }
+
+  validateAllFields() {
+    return this.validateFieldsHelper();
   }
 }
 
