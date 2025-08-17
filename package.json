@@ -10,10 +10,10 @@
   },
   "dependencies": {
     "antd": "^5.27.0",
-    "async-validator": "^4.2.5",
     "next": "14.2.31",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "zod": "^4.0.17"
   },
   "devDependencies": {
     "@types/node": "^20",

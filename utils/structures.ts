@@ -10,7 +10,7 @@
  */
 
 // ----------------------------- 内部模型层 -----------------------------
-import Schema, { RuleItem, ValidateError, Values } from "async-validator";
+import { z, ZodType, ZodError, ZodIssue } from "zod";
 import { ComponentType } from "react";
 
 type FieldKey = string;
@@ -24,11 +24,11 @@ type ControlType = "input" | "radio"
 interface FieldSchema {
   key: FieldKey;
   label?: string;
-  type?: RuleItem['type'];
+  validate?: ZodType;
   control?: ControlType;
   // 对于枚举型的字段组件：提供 options
   options?: Array<{ label: string; value: string | number | boolean }>;
-  rules?: RuleItem[];
+  schema?: ZodType; // 使用 zod schema 替代 rules
   // 初始可见性
   initialVisible?: boolean;
   // 单独给字段组件设置的prop
@@ -74,16 +74,14 @@ interface ReactiveRule {
 
 /** 内部对象：管理值与可见性、规则注册与触发 */
 class FormModel {
-  // 存放编译后的树状数据
   private compiledData: FieldWithStateSchema;
-  // 存放校验规则，只用给async-validators适配
-  private descriptor: Values;
+  private rootSchema: ZodType | null = null; // 缓存根级别的 zod schema
+  private fieldSchemaMap: Map<string, ZodType> = new Map(); // 缓存每个字段的 schema
 
   private listeners = new Set<(stateSchema: FieldWithStateSchema[]) => void>();
 
   private rules: ReactiveRule[] = [];
 
-  /** 做两件事：dfs构建编译后的节点，dfs构建用于给async-validator库使用的descriptor */
   constructor(schema: FormSchema, initialValues?: Record<FieldKey, FieldValue>) {
     // schema是一个递归结构，接下来将schema转换为stateStructure
     // 此处使用虚拟根结点，用于简化代码，这样就不需要手动复制树的第一层了
@@ -107,9 +105,9 @@ class FormModel {
           options: item.options ?? [],
           initialVisible: item.initialVisible,
           itemProps: item.itemProps,
-          rules: item.rules || [],
+          schema: item.schema,
           control: item.control,
-          type: item.type
+          validate: item.validate
         },
         children: []
       }
@@ -123,55 +121,74 @@ class FormModel {
       return res;
     }
 
-    const dfsForSchema = (schema: FieldSchema, structure: FieldWithStateSchema, seenPath: FieldPath) => {
+    const dfs = (schema: FieldSchema, structure: FieldWithStateSchema, seenPath: FieldPath) => {
       for (let item of schema.childrenFields || []) {
         const newNode: FieldWithStateSchema = copyOneNode(item, [...seenPath, item.key]);
-        dfsForSchema(item, newNode, [...seenPath, item.key]);
+        dfs(item, newNode, [...seenPath, item.key]);
         structure.children.push(newNode)
       }
     }
 
-    dfsForSchema({
+    dfs({
       childrenFields: schema.fields,
       key: ''
     }, this.compiledData, []);
 
+    // 构建并缓存所有的 zod schema
+    this.buildSchemas();
+  }
 
-    // 构建validator
-
-    this.descriptor = {};
-
-    const dfsForValidator = (sourceData: FieldWithStateSchema, validator: {
-      [key: string]: any
-    }) => {
-      // 复制孩子结点
-      for (let i of sourceData.children) {
-        if (i.schemaData) { // 说明已经是叶子结点
-          this.set(i.path, 'errorMessage', undefined);
-          
-          // 复制Rule
-          let rules: RuleItem[] = i.schemaData.rules! || [];
-          if (!rules.find((r) => { return r.type }) && i.schemaData.type) {
-            rules.push({
-              'type': i.schemaData.type,
-              message: `The type must be ${i.schemaData.type}, or you should specify a type.`
-            });
+  /** 构建并缓存所有字段的 zod schema 
+   * 优化说明：
+   * 1. 在构造函数中一次性构建所有 schema，避免每次校验时重复构建
+   * 2. 使用 Map 缓存字段级别的 schema，提高单字段校验性能
+   * 3. 为动态字段可见性提供专门的重建方法
+   */
+  private buildSchemas() {
+    // 递归构建 zod schema
+    const buildZodSchema = (node: FieldWithStateSchema): ZodType | null => {
+      // 如果是叶子节点且有 schema
+      if ((!node.children || node.children.length === 0) && node.schemaData) {
+        const fieldSchema = node.schemaData.schema || node.schemaData.validate || z.any();
+        // 缓存字段级别的 schema
+        this.fieldSchemaMap.set(node.path.join('.'), fieldSchema);
+        return fieldSchema;
+      }
+      
+      // 如果有子节点，构建对象 schema
+      if (node.children && node.children.length > 0) {
+        const shape: Record<string, ZodType> = {};
+        
+        for (const child of node.children) {
+          const childSchema = buildZodSchema(child);
+          if (childSchema) {
+            shape[child.key] = childSchema;
           }
-
-          validator[i.key] = rules;
-        } else {
-          validator[i.key] = {
-            type: 'object',
-            fields: {}
-          };
-          dfsForValidator(i, validator[i.key].fields);
+        }
+        
+        if (Object.keys(shape).length > 0) {
+          const objectSchema = z.object(shape);
+          // 缓存对象级别的 schema
+          this.fieldSchemaMap.set(node.path.join('.'), objectSchema);
+          return objectSchema;
         }
       }
+      
+      return null;
+    };
+    
+    // 构建根级别的 schema
+    const rootShape: Record<string, ZodType> = {};
+    for (const child of this.compiledData.children) {
+      const childSchema = buildZodSchema(child);
+      if (childSchema) {
+        rootShape[child.key] = childSchema;
+      }
     }
-
-    dfsForValidator(this.compiledData, this.descriptor)
-
-    console.log(this.descriptor);
+    
+    if (Object.keys(rootShape).length > 0) {
+      this.rootSchema = z.object(rootShape);
+    }
 
   }
 
@@ -202,7 +219,6 @@ class FormModel {
     return () => void this.listeners.delete(fn);
   }
 
-  // 触发更新
   private notify() {
     for (const fn of this.listeners) fn(
       this.compiledData.children
@@ -401,89 +417,128 @@ class FormModel {
     return result;
   }
 
-  validateFields(paths: FieldPath[]): Promise<Values> {
-    return this.validateFieldsHelper(paths);
+  /** 获取指定字段的 schema */
+  getFieldSchema(path: FieldPath): ZodType | null {
+    const fieldKey = path.join('.');
+    return this.fieldSchemaMap.get(fieldKey) || null;
   }
 
+  /** 获取所有字段的 schema 映射 */
+  getAllFieldSchemas(): Map<string, ZodType> {
+    return new Map(this.fieldSchemaMap);
+  }
 
-  /**
-   * 校验指定路径的表单字段。
-   *
-   * 该方法通过路径定位字段节点，构建基于字段规则的校验 schema，并校验当前字段值。
-   * 校验成功时会清除字段的错误信息，校验失败则设置错误信息。
-   * 方法返回一个 Promise，成功时返回校验结果，失败时抛出校验错误。
-   *
-   * @param path - 字段路径（字符串数组）。
-   * @returns Promise，成功返回校验值，失败抛出校验错误。
-   */
-  validateField(path: FieldPath) {
+  validateField(path: FieldPath): Promise<any> {
     const node = this.findNodeByPath(path);
-    const descriptor: any = {};
-    // 字段名(使用点分隔)
-    const fieldName = path.join('.');
+    if (!node || !node.state) {
+      return Promise.reject(new Error('Field not found or has no state'));
+    }
 
-    descriptor[fieldName] = node?.schemaData?.rules;
-    const schema = new Schema(descriptor);
+    // 从缓存中获取 schema
+    const fieldKey = path.join('.');
+    const schema = this.fieldSchemaMap.get(fieldKey);
+    
+    if (!schema) {
+      // 没有校验规则时，直接通过
+      this.set(path, 'errorMessage', undefined);
+      return Promise.resolve(node.state.value);
+    }
 
-    return schema.validate({
-      [path.join('.')]: node?.state?.value
-    }).then((values) => {
+    try {
+      const result = schema.parse(node.state.value);
       // 校验成功，清除错误信息
       this.set(path, 'errorMessage', undefined);
-      return values;
-    }).catch((error) => {
+      return Promise.resolve(result);
+    } catch (error) {
       // 校验失败，设置错误信息
-      if (error.fields && error.fields[fieldName]) {
-        const errors = error.fields[fieldName] as ValidateError[];
-        const errorMessage = errors.length > 0 ? errors[0].message : undefined;
+      if (error instanceof ZodError) {
+        const firstError = error.issues[0];
+        const errorMessage = firstError?.message || 'Validation failed';
         this.set(path, 'errorMessage', errorMessage);
       }
-      throw error;
-    });
-  }
-
-  async validateFieldsHelper(paths?: FieldPath[]): Promise<Values> {
-    const form = this.getJSONData();
-    
-    // 直接拿validator
-    const schema = new Schema(this.descriptor);
-    // 根据是否有fields区分情况
-    
-    try {
-      return await schema.validate(form,
-        paths ? {
-          keys: paths.map((path) => path.join('.')),
-        }
-          : undefined);
-    } catch (error) {
-      const fields = (error as any).fields;
-
-      // 先清空传入的所有字段的错误信息
-      const allLeafPaths = paths ?? this.getAllLeafPaths();
-      allLeafPaths.forEach(path_1 => {
-        this.set(path_1, 'errorMessage', undefined);
-      });
-
-      // 根据验证错误设置对应字段的错误信息
-      if (fields) {
-        Object.entries(fields).forEach(([fieldPath, errors]) => {
-          // 将用点分隔的字符串转换为路径数组
-          const path_3 = fieldPath.split('.');
-
-          // 获取第一个错误信息作为显示内容，确保类型安全
-          const errorArray = errors as ValidateError[];
-          const errorMessage = errorArray.length > 0 ? errorArray[0].message : undefined;
-          // 设置字段的错误信息
-          this.set(path_3, 'errorMessage', errorMessage);
-        });
-      }
-      console.log(this.compiledData);
-      return (error as any).fields;
+      return Promise.reject(error);
     }
   }
 
-  validateAllFields() {
-    return this.validateFieldsHelper();
+  validateFields(paths: FieldPath[]): Promise<any> {
+    const promises = paths.map(path => this.validateField(path));
+    return Promise.all(promises);
+  }
+
+  /** 重新构建 schema（当字段可见性发生变化时调用） */
+  private rebuildDynamicSchema(): ZodType | null {
+    // 递归构建考虑可见性的 zod schema
+    const buildDynamicZodSchema = (node: FieldWithStateSchema): ZodType | null => {
+      // 如果节点不可见，跳过
+      if (node.state && !node.state.visible) {
+        return null;
+      }
+      
+      // 如果是叶子节点且有 schema
+      if ((!node.children || node.children.length === 0) && node.schemaData) {
+        const fieldKey = node.path.join('.');
+        return this.fieldSchemaMap.get(fieldKey) || null;
+      }
+      
+      // 如果有子节点，构建对象 schema
+      if (node.children && node.children.length > 0) {
+        const shape: Record<string, ZodType> = {};
+        
+        for (const child of node.children) {
+          const childSchema = buildDynamicZodSchema(child);
+          if (childSchema) {
+            shape[child.key] = childSchema;
+          }
+        }
+        
+        return Object.keys(shape).length > 0 ? z.object(shape) : null;
+      }
+      
+      return null;
+    };
+    
+    // 构建根级别的动态 schema
+    const rootShape: Record<string, ZodType> = {};
+    for (const child of this.compiledData.children) {
+      const childSchema = buildDynamicZodSchema(child);
+      if (childSchema) {
+        rootShape[child.key] = childSchema;
+      }
+    }
+    
+    return Object.keys(rootShape).length > 0 ? z.object(rootShape) : null;
+  }
+
+  validateAllFields(): Promise<any> {
+    // 使用动态构建的 schema 来处理字段可见性
+    const dynamicSchema = this.rebuildDynamicSchema();
+    
+    if (!dynamicSchema) {
+      // 如果没有任何可见字段需要校验，直接返回表单数据
+      return Promise.resolve(this.getJSONData());
+    }
+
+    const form = this.getJSONData();
+    
+    // 先清空所有字段的错误信息
+    const allLeafPaths = this.getAllLeafPaths();
+    allLeafPaths.forEach(path => {
+      this.set(path, 'errorMessage', undefined);
+    });
+    
+    try {
+      const result = dynamicSchema.parse(form);
+      return Promise.resolve(result);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        // 处理验证错误，设置对应字段的错误信息
+        error.issues.forEach((issue) => {
+          const path = issue.path.map(String); // 将路径转换为字符串数组
+          this.set(path, 'errorMessage', issue.message);
+        });
+      }
+      return Promise.reject(error);
+    }
   }
 }
 

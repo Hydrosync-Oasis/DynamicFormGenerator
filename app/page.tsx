@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Button, Select, Switch, Card, Tag, Space, Divider, Steps, DatePicker, InputNumber, Rate, Slider } from 'antd';
 import { FormModel, FormSchema, FieldValue } from '../utils/structures';
 import { Generator, useDynamicForm } from '../utils/generator';
+import * as z from 'zod';
 
 // 自定义组件示例：带标签的选择器
 const TagSelector: React.FC<{
@@ -94,14 +95,14 @@ const SliderSelector: React.FC<{
 // 自定义组件：年龄选择器
 const AgeSelector: React.FC<{
   value: number;
-  onChange: (value: number) => void;
+  onChange: (value: number | null) => void;
 }> = ({ value, onChange }) => {
   return (
     <InputNumber
       min={1}
       max={120}
       value={value}
-      onChange={(val) => onChange(val || 18)}
+      onChange={(val) => onChange(val)}
       addonAfter="岁"
       placeholder="请输入年龄"
       style={{ width: '100%' }}
@@ -125,22 +126,20 @@ const formSchema: FormSchema = {
               key: 'name',
               label: '姓名',
               control: 'input',
-              rules: [
-                { required: true, message: '请输入姓名' },
-                { min: 2, message: '姓名至少2个字符' },
-                { max: 20, message: '姓名不能超过20个字符' }
-              ],
+              schema: z.string()
+                .min(2, '姓名至少2个字符')
+                .max(20, '姓名不能超过20个字符')
+                .nonempty('请输入姓名'),
               itemProps: { placeholder: '请输入您的真实姓名' }
             },
             {
               key: 'age',
               label: '年龄',
-              type: 'number',
-              control: AgeSelector,
-              rules: [
-                { required: true, message: '请输入年龄' },
-                { type: 'number', min: 18, max: 65, message: '年龄必须在18-65岁之间' }
-              ]
+              schema: z.number()
+                .int('年龄必须是整数')
+                .min(18, '年龄必须在18-65岁之间')
+                .max(65, '年龄必须在18-65岁之间'),
+              control: AgeSelector
             },
             {
               key: 'gender',
@@ -151,7 +150,9 @@ const formSchema: FormSchema = {
                 { label: '女', value: 'female' },
                 { label: '其他', value: 'other' }
               ],
-              rules: [{ required: true, message: '请选择性别' }]
+              schema: z.enum(['male', 'female', 'other'], {
+                message: '请选择性别'
+              })
             }
           ]
         },
@@ -162,22 +163,19 @@ const formSchema: FormSchema = {
             {
               key: 'email',
               label: '邮箱',
-              type: 'email',
               control: 'input',
-              rules: [
-                { required: true, message: '请输入邮箱' },
-                { type: 'email', message: '请输入有效的邮箱地址' }
-              ],
+              schema: z.string()
+                .email('请输入有效的邮箱地址')
+                .nonempty('请输入邮箱'),
               itemProps: { placeholder: 'example@email.com' }
             },
             {
               key: 'phone',
               label: '手机号',
               control: 'input',
-              rules: [
-                { required: true, message: '请输入手机号' },
-                { pattern: /^1[3-9]\d{9}$/, message: '请输入有效的手机号' }
-              ],
+              schema: z.string()
+                .regex(/^1[3-9]\d{9}$/, '请输入有效的手机号')
+                .nonempty('请输入手机号'),
               itemProps: { placeholder: '请输入11位手机号' }
             }
           ]
@@ -201,7 +199,9 @@ const formSchema: FormSchema = {
             { label: '自由职业者', value: 'freelancer' },
             { label: '企业主', value: 'business_owner' }
           ],
-          rules: [{ required: true, message: '请选择用户类型' }]
+          schema: z.enum(['student', 'employee', 'freelancer', 'business_owner'], {
+            message: '请选择用户类型'
+          })
         },
         
         // 学生信息（动态显示）
@@ -214,20 +214,21 @@ const formSchema: FormSchema = {
               key: 'school',
               label: '学校名称',
               control: 'input',
-              rules: [{ required: true, message: '请输入学校名称' }],
+              schema: z.string().nonempty('请输入学校名称'),
               itemProps: { placeholder: '请输入学校全称' }
             },
             {
               key: 'major',
               label: '专业',
               control: 'input',
-              rules: [{ required: true, message: '请输入专业' }],
+              schema: z.string().nonempty('请输入专业'),
               itemProps: { placeholder: '请输入专业名称' }
             },
             {
               key: 'grade',
               label: '年级',
               control: 'radio',
+              schema: z.string(),
               options: [
                 { label: '大一', value: 'freshman' },
                 { label: '大二', value: 'sophomore' },
@@ -249,20 +250,20 @@ const formSchema: FormSchema = {
               key: 'company',
               label: '公司名称',
               control: 'input',
-              rules: [{ required: true, message: '请输入公司名称' }],
+              schema: z.string().nonempty('请输入公司名称'),
               itemProps: { placeholder: '请输入公司全称' }
             },
             {
               key: 'position',
               label: '职位',
               control: 'input',
-              rules: [{ required: true, message: '请输入职位' }],
+              schema: z.string().nonempty('请输入职位'),
               itemProps: { placeholder: '请输入您的职位' }
             },
             {
               key: 'workYears',
               label: '工作年限',
-              type: 'number',
+              schema: z.number().min(0).max(40),
               control: SliderSelector,
               itemProps: { min: 0, max: 40, step: 1, suffix: '年' }
             },
@@ -291,7 +292,7 @@ const formSchema: FormSchema = {
               key: 'companyName',
               label: '企业名称',
               control: 'input',
-              rules: [{ required: true, message: '请输入企业名称' }],
+              schema: z.string().nonempty('请输入企业名称'),
               itemProps: { placeholder: '请输入企业全称' }
             },
             {
@@ -333,10 +334,9 @@ const formSchema: FormSchema = {
           key: 'interests',
           label: '兴趣爱好',
           control: TagSelector,
-          rules: [
-            { type: 'array', min: 2, message: '请至少选择2个兴趣爱好' },
-            { type: 'array', max: 8, message: '最多选择8个兴趣爱好' }
-          ],
+          schema: z.array(z.string())
+            .min(2, '请至少选择2个兴趣爱好')
+            .max(8, '最多选择8个兴趣爱好'),
           options: [
             { label: '编程技术', value: 'programming' },
             { label: '产品设计', value: 'design' },
@@ -355,7 +355,7 @@ const formSchema: FormSchema = {
           label: '技能水平',
           control: RatingSelector,
           itemProps: { max: 10 },
-          rules: [{ required: true, message: '请评估您的技能水平' }]
+          schema: z.number().min(1, '请评估您的技能水平').max(10)
         },
         {
           key: 'learningGoal',
@@ -370,21 +370,21 @@ const formSchema: FormSchema = {
             {
               key: 'emailNotification',
               label: '邮件通知',
-              type: 'boolean',
+              schema: z.boolean(),
               control: SwitchSelector,
               itemProps: { label: '接收邮件通知' }
             },
             {
               key: 'smsNotification',
               label: '短信通知',
-              type: 'boolean',
+              schema: z.boolean(),
               control: SwitchSelector,
               itemProps: { label: '接收短信通知' }
             },
             {
               key: 'pushNotification',
               label: '推送通知',
-              type: 'boolean',
+              schema: z.boolean(),
               control: SwitchSelector,
               itemProps: { label: '接收推送通知' }
             }
@@ -418,7 +418,7 @@ const formSchema: FormSchema = {
             {
               key: 'comments',
               label: '意见建议',
-              type: 'string',
+              schema: z.string().optional(),
               control: 'input',
               itemProps: {
                 placeholder: '请输入您的意见和建议...',
@@ -435,14 +435,14 @@ const formSchema: FormSchema = {
             {
               key: 'dataSharing',
               label: '数据共享',
-              type: 'boolean',
+              schema: z.boolean(),
               control: SwitchSelector,
               itemProps: { label: '同意数据用于产品改进' }
             },
             {
               key: 'marketing',
               label: '营销推广',
-              type: 'boolean',
+              schema: z.boolean(),
               control: SwitchSelector,
               itemProps: { label: '同意接收营销信息' }
             }
@@ -713,6 +713,30 @@ export default function DynamicFormDemo() {
   //   }
   // }, [model.getSnapshot(), currentStep]);
 
+  // 验证当前步骤
+  const validateCurrentStep = async () => {
+    try {
+      const currentStepFields = displayFields.filter(path => {
+        const currentStepKey = steps[currentStep]?.key;
+        return currentStepKey ? path[0] === currentStepKey : true;
+      }).filter(field => {
+        try {
+          return model.get(field, 'visible');
+        } catch {
+          return false;
+        }
+      });
+      
+      if (currentStepFields.length > 0) {
+        await model.validateFields(currentStepFields);
+      }
+      return true;
+    } catch (error) {
+      console.log('当前步骤验证失败:', error);
+      return false;
+    }
+  };
+
   const handleFinish = (values: Record<string, FieldValue>) => {
     console.log('🎉 表单提交值:', values);
     console.log('📊 内部模型数据:', model.getJSONData());
@@ -808,15 +832,11 @@ export default function DynamicFormDemo() {
     
     // 验证当前步骤
     validateCurrentStep: async () => {
-      const currentStepKey = steps[currentStep]?.key;
-      if (currentStepKey) {
-        try {
-          // 这里可以实现步骤级别的验证
-          await model.validateAllFields();
-          alert(`✅ 当前步骤 "${steps[currentStep].title}" 验证通过！`);
-        } catch (error) {
-          alert(`❌ 当前步骤存在验证错误，请检查红色错误提示`);
-        }
+      const isValid = await validateCurrentStep();
+      if (isValid) {
+        alert(`✅ 当前步骤 "${steps[currentStep].title}" 验证通过！`);
+      } else {
+        alert(`❌ 当前步骤存在验证错误，请检查红色错误提示`);
       }
     }
   };
@@ -916,14 +936,92 @@ export default function DynamicFormDemo() {
       {/* 主表单区域 */}
       <Generator
         model={model}
-        schema={formSchema}
         displayFields={displayFields.filter(path => {
           // 只显示当前步骤的字段
           const currentStepKey = steps[currentStep]?.key;
           return currentStepKey ? path[0] === currentStepKey : true;
         })}
-        onFinish={handleFinish}
       />
+
+      {/* 步骤控制按钮 */}
+      <Card style={{ marginTop: '20px' }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          padding: '16px 0'
+        }}>
+          <Button 
+            size="large"
+            disabled={currentStep === 0}
+            onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+            style={{ minWidth: '100px' }}
+          >
+            ← 上一步
+          </Button>
+          
+          <div style={{ 
+            textAlign: 'center', 
+            color: '#666',
+            fontSize: '16px',
+            fontWeight: '500'
+          }}>
+            <div>步骤 {currentStep + 1} / {steps.length}</div>
+            <div style={{ fontSize: '14px', marginTop: '4px', color: '#1890ff' }}>
+              {steps[currentStep]?.title}
+            </div>
+          </div>
+          
+          {currentStep === steps.length - 1 ? (
+            <Button 
+              type="primary"
+              size="large"
+              style={{ 
+                minWidth: '100px',
+                backgroundColor: '#52c41a',
+                borderColor: '#52c41a'
+              }}
+              onClick={async () => {
+                const isValid = await validateCurrentStep();
+                if (isValid) {
+                  // 如果验证通过，提交表单
+                  handleFinish(model.getJSONData());
+                } else {
+                  alert('❌ 当前步骤存在验证错误，请检查红色错误提示');
+                }
+              }}
+            >
+              🎉 提交
+            </Button>
+          ) : (
+            <Button 
+              type="primary"
+              size="large"
+              style={{ minWidth: '100px' }}
+              onClick={async () => {
+                // 先验证当前步骤
+                const isValid = await validateCurrentStep();
+                if (!isValid) {
+                  alert('❌ 当前步骤存在验证错误，请检查后再进入下一步');
+                  return;
+                }
+                
+                const nextStep = currentStep + 1;
+                const nextStepKey = steps[nextStep]?.key;
+                const nextStepNode = model.getSnapshot().find(node => node.key === nextStepKey);
+                
+                if (nextStepNode?.state?.visible !== false) {
+                  setCurrentStep(nextStep);
+                } else {
+                  alert('⚠️ 下一步骤尚未解锁，请完成当前步骤的所有必填字段');
+                }
+              }}
+            >
+              下一步 →
+            </Button>
+          )}
+        </div>
+      </Card>
 
       {/* 调试和操作面板 */}
       <Card title="🔧 开发者面板" style={{ marginTop: '20px' }}>

@@ -1,25 +1,22 @@
 import { ConfigProvider, Divider, Alert, Card, Col, Radio, Row, Space, Input } from "antd";
 import React, { useState, useEffect, ComponentType } from "react";
 import { FieldPath, FieldSchema, FieldValue, FormModel, FormSchema } from "./structures";
-import type { Values } from 'async-validator';
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 interface GeneratorProps {
   model: FormModel;
-  schema: FormSchema;
   displayFields: FieldPath[];
-  onFinish?: (values: Record<string, FieldValue>) => void;
 }
 
 /** 自定义表单生成器的hook */
 interface DynamicFormHook {
-  submit: () => Promise<Values>;
+  submit: () => Promise<any>;
   getFieldValue: (path: FieldPath) => any;
   setFieldValue: (path: FieldPath, value: FieldValue) => void;
   setFieldsValue: (value: any) => void;
-  validateField: (path: FieldPath) => Promise<Values>;
-  validateFields: (paths: FieldPath[]) => Promise<Values>;
-  validateAllFields: (paths: FieldPath[]) => Promise<Values>;
+  validateField: (path: FieldPath) => Promise<any>;
+  validateFields: (paths: FieldPath[]) => Promise<any>;
+  validateAllFields: (paths: FieldPath[]) => Promise<any>;
 }
 
 const useDynamicForm2 = (model: FormModel) => {
@@ -73,7 +70,7 @@ const useDynamicForm2 = (model: FormModel) => {
   return hook;
 };
 
-const Generator: React.FC<GeneratorProps> = ({ model, displayFields, onFinish }) => {
+const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
   // 响应式更新
   const [, force] = useState({});
   useEffect(() => {
@@ -101,7 +98,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields, onFinish })
     }
     
     // 叶子节点才渲染UI
-    const { label, control, options, itemProps, rules } = node.schemaData!;
+    const { label, control, options, itemProps } = node.schemaData!;
     
     let CustomComponent: ComponentType<{
       value: FieldValue,
@@ -179,18 +176,6 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields, onFinish })
     );
   };
 
-  // 处理表单提交
-  const handleSubmit = async () => {
-    try {
-      const values = await model.validateFields(displayFields);
-      if (onFinish) {
-        onFinish(model.getJSONData());
-      }
-    } catch (error) {
-      console.log('Form validation failed:', error);
-    }
-  };
-
   return (
     <Card className="max-w-5xl mx-auto mt-6">
       <Divider />
@@ -208,26 +193,6 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields, onFinish })
           <Space size="small" direction="vertical" style={{ width: "100%" }}>
             {displayFields.map(path => renderField(Array.isArray(path) ? path : [path]))}
           </Space>
-          
-          {onFinish && (
-            <div style={{ marginTop: '24px', textAlign: 'center' }}>
-              <button 
-                type="button"
-                onClick={handleSubmit}
-                style={{
-                  backgroundColor: '#1890ff',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  padding: '8px 16px',
-                  cursor: 'pointer',
-                  fontSize: '14px'
-                }}
-              >
-                提交
-              </button>
-            </div>
-          )}
           
           <Divider />
         </div>
