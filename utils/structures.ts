@@ -33,6 +33,8 @@ interface FieldSchema {
   initialVisible?: boolean;
   // 单独给字段组件设置的prop
   itemProps?: object;
+  // 默认值
+  defaultValue?: FieldValue;
 
   // 嵌套子字段
   childrenFields?: FieldSchema[];
@@ -82,7 +84,7 @@ class FormModel {
 
   private rules: ReactiveRule[] = [];
 
-  constructor(schema: FormSchema, initialValues?: Record<FieldKey, FieldValue>) {
+  constructor(schema: FormSchema) {
     // schema是一个递归结构，接下来将schema转换为stateStructure
     // 此处使用虚拟根结点，用于简化代码，这样就不需要手动复制树的第一层了
     this.compiledData = {
@@ -97,6 +99,7 @@ class FormModel {
         key: item.key,
         path: path, //[...seenPath, item.key],
         state: {
+          value: item.defaultValue,
           visible: item.initialVisible ?? true,
           options: item.options ?? []
         },
