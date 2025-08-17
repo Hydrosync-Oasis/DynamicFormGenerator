@@ -99,6 +99,9 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
     
     // 叶子节点才渲染UI
     const { label, control, options, itemProps } = node.schemaData!;
+
+    const zodSchema = node.schemaData?.schema || node.schemaData?.validate;
+    const isRequired = zodSchema ? !zodSchema.isOptional() : false;
     
     let CustomComponent: ComponentType<{
       value: FieldValue,
@@ -133,7 +136,10 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
         <div style={{ marginBottom: '0px' }}>
           <Row align="middle">
             <Col span={4} style={{ textAlign: 'right', paddingRight: '8px', lineHeight: '32px' }}>
-              <label htmlFor={path.join('/')} style={{ color: '#000000d9' }}>{label}:</label>
+              <label htmlFor={path.join('/')} style={{ color: '#000000d9' }}>
+                {isRequired && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
+                {label}:
+              </label>
             </Col>
             <Col span={20}>
               {/* 三选一逻辑：自定义组件 > 控件类型(input/radio) */}

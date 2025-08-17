@@ -130,7 +130,8 @@ const formSchema: FormSchema = {
                 .min(2, '姓名至少2个字符')
                 .max(20, '姓名不能超过20个字符')
                 .nonempty('请输入姓名'),
-              itemProps: { placeholder: '请输入您的真实姓名' }
+              itemProps: { placeholder: '请输入您的真实姓名' },
+              defaultValue: '张三'
             },
             {
               key: 'age',
@@ -139,7 +140,8 @@ const formSchema: FormSchema = {
                 .int('年龄必须是整数')
                 .min(18, '年龄必须在18-65岁之间')
                 .max(65, '年龄必须在18-65岁之间'),
-              control: AgeSelector
+              control: AgeSelector,
+              defaultValue: 25
             },
             {
               key: 'gender',
@@ -152,7 +154,8 @@ const formSchema: FormSchema = {
               ],
               schema: z.enum(['male', 'female', 'other'], {
                 message: '请选择性别'
-              })
+              }),
+              defaultValue: 'male'
             }
           ]
         },
@@ -450,7 +453,7 @@ const formSchema: FormSchema = {
         }
       ]
     }
-  ]
+  ],
 };
 const model = new FormModel(formSchema);
 
