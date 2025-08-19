@@ -185,7 +185,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
             </Col>
             <Col span={20}>
               {/* 三选一逻辑：自定义组件 > 控件类型(input/radio) */}
-              <div id={path.join('/')}>
+              <div>
                 {CustomComponent ? (
                   <CustomComponent
                     value={node.state.value}
@@ -194,6 +194,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                     status={node.state.errorMessage ? 'error' : undefined}
                     disabled={node.state.disabled}
                     {...itemProps}
+                    id={path.join('/')}
                   />
                 ) : control === "input" ? (
                   <Input
@@ -202,12 +203,15 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                     onChange={(e) => handleChange(e.target.value)}
                     status={node.state.errorMessage ? 'error' : undefined}
                     disabled={node.state.disabled}
+                    id={path.join('/')}
                   />
                 ) : control === "radio" ? (
                   <Radio.Group
                     value={node.state.value}
                     options={node.state.options || options}
                     onChange={(e) => handleChange(e.target.value)}
+                    disabled={node.state.disabled}
+                    id={path.join('/')}
                   />
                 ) : control === "select" ? (
                   <Select
@@ -218,6 +222,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                     placeholder="请选择"
                     status={node.state.errorMessage ? 'error' : undefined}
                     disabled={node.state.disabled}
+                    id={path.join('/')}
                     {...itemProps}
                   />
                 ) : null}
