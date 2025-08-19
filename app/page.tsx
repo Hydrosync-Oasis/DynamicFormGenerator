@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button, Card, Tag, Space, Divider, Alert } from 'antd';
 import { FormModel, FormSchema, FieldValue } from '../utils/structures';
 import { Generator, useDynamicForm } from '../utils/generator';
@@ -68,11 +68,12 @@ const responsiveValidationSchema: FormSchema = {
   ]
 };
 
-const model = new FormModel(responsiveValidationSchema);
 
 export default function ResponsiveValidationDemo() {
   const [currentRule, setCurrentRule] = useState<string>('default');
   const [validationStatus, setValidationStatus] = useState<string>('');
+  
+  const [model, _] = useState(new FormModel(responsiveValidationSchema));
   
   // 创建表单模型
   const form = useDynamicForm(model);

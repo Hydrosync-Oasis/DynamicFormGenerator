@@ -164,7 +164,8 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                 {
                   display: 'flex',
                   flexDirection: 'row-reverse',
-                  gap: '4px'
+                  gap: '4px',
+                  color: '#000000'
                 }}>
                 <span>:</span>
                 <>
