@@ -1,6 +1,8 @@
-import { ConfigProvider, Divider, Alert, Card, Col, Radio, Row, Space, Input } from "antd";
+import { ConfigProvider, Divider, Alert, Card, Col, Radio, Row, Space, Input, Select, Tooltip, Flex } from "antd";
 import React, { useState, useEffect, ComponentType } from "react";
-import { FieldPath, FieldSchema, FieldValue, FormModel, FormSchema } from "./structures";
+import { FieldPath, FieldSchema, FieldValue, FormModel } from "./structures";
+import { ZodType } from "zod";
+import { InfoCircleOutlined } from "@ant-design/icons";
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 interface GeneratorProps {
@@ -15,8 +17,8 @@ interface DynamicFormHook {
   setFieldValue: (path: FieldPath, value: FieldValue) => void;
   setFieldsValue: (value: any) => void;
   validateField: (path: FieldPath) => Promise<any>;
-  validateFields: (paths: FieldPath[]) => Promise<any>;
-  validateAllFields: (paths: FieldPath[]) => Promise<any>;
+  validateFields: (paths: FieldPath[], enhancer?: (schema: ZodType) => ZodType) => Promise<any>;
+  validateAllFields: (enhancer?: (schema: ZodType) => ZodType) => Promise<any>;
 }
 
 const useDynamicForm2 = (model: FormModel) => {
@@ -28,8 +30,8 @@ const useDynamicForm2 = (model: FormModel) => {
   }, [model]);
 
   const hook: DynamicFormHook = {
-    validateAllFields: () => {
-      return model.validateAllFields();
+    validateAllFields: (enhancer?: (schema: ZodType) => ZodType) => {
+      return model.validateAllFields(enhancer);
     },
     validateField: (path: FieldPath) => {
       return model.validateField(path);
@@ -51,19 +53,26 @@ const useDynamicForm2 = (model: FormModel) => {
           if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
             setNestedValues(value, path);
           } else {
-            model.set(path, 'value', value);
+            try {
+              model.set(path, 'value', value);
+            } catch {
+              // 说明有多余字段
+            }
           }
         });
       };
       setNestedValues(values);
     },
-    /** 只校验显示的字段 */
-    validateFields: (paths: FieldPath[]) => {
-      return model.validateFields(paths.filter(
-        (path) => {
-          return model.get(path, 'visible')
-        }
-      ));
+    /** 
+     * 校验指定字段，无论是否显示都校验，使用多步骤动态表单优先使用这个函数
+     * @param paths 要校验的字段路径数组
+     * @param enhancer 可选的增强函数，用于添加跨字段校验规则
+     */
+    validateFields: (paths: FieldPath[], enhancer?: (schema: ZodType) => ZodType) => {
+      return model.validateFieldsWithEnhancer(
+        paths.filter(path => model.get(path, 'visible')),
+        enhancer
+      );
     },
   };
 
@@ -78,16 +87,16 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
       force({});
     });
   }, [model]);
-  
+
   // 递归渲染字段
   const renderField = (path: FieldPath): React.ReactNode => {
     const node = model.findNodeByPath(path);
     if (!node) return null;
     if (!node.state) return null;
-    
+
     const visible = node.state.visible;
     if (!visible) return null;
-    
+
     // 如果有子节点，则不渲染当前节点，只渲染子节点
     if (node.children.length > 0) {
       return (
@@ -96,19 +105,19 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
         </React.Fragment>
       );
     }
-    
+
     // 叶子节点才渲染UI
     const { label, control, options, itemProps } = node.schemaData!;
 
-    const zodSchema = node.schemaData?.schema || node.schemaData?.validate;
+    const zodSchema = node.state?.validation;
     const isRequired = zodSchema ? !zodSchema.isOptional() : false;
-    
+
     let CustomComponent: ComponentType<{
-      value: FieldValue,
-      onChange: (value: FieldValue) => void,
+      value?: FieldValue,
+      onChange?: (value: FieldValue) => void,
       options?: FieldSchema['options']
     } & Record<string, any>> | undefined = undefined;
-    
+
     if (typeof control !== 'string') {
       CustomComponent = control;
     }
@@ -124,21 +133,53 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
         // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
       });
     };
-    
+
     return (
       <React.Fragment key={path.join('/')}>
-        <Row>
-          <Col offset={4} span={20}>
-            {node.state.alertTip && <Alert message={node.state.alertTip} type='warning' />}
-          </Col>
-        </Row>
         {/* 自定义表单项布局 */}
-        <div style={{ marginBottom: '0px' }}>
+        <Row>
+          <Col span={24}>
+          <Row>
+            <Col offset={4} span={20}>
+              {/* Alert提示框 */}
+              {node.state.alertTip &&
+                <ConfigProvider theme={{
+                  token: {
+                    fontSize: 12
+                  },
+                  components: {
+                    Alert: {
+                      defaultPadding: "3px 6px"
+                    }
+                  }
+                }}>
+                  <Alert message={node.state.alertTip} type='warning' />
+                </ConfigProvider>
+              }
+            </Col>
+          </Row>
           <Row align="middle">
             <Col span={4} style={{ textAlign: 'right', paddingRight: '8px', lineHeight: '32px' }}>
-              <label htmlFor={path.join('/')} style={{ color: '#000000d9' }}>
-                {isRequired && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
-                {label}:
+              <label htmlFor={path.join('/')} style={
+                {
+                  display: 'flex',
+                  flexDirection: 'row-reverse',
+                  gap: '4px'
+                }}>
+                <span>:</span>
+                <>
+                  {
+                    node.schemaData?.helpTip
+                      ? <>
+                        <Tooltip title={node.schemaData.helpTip}>
+                          <InfoCircleOutlined twoToneColor="#8C8C8C" style={{ opacity: 0.48 }} />
+                        </Tooltip>
+                      </>
+                      : <></>
+                  }
+                </>
+                <span>{label}</span>
+                <span>{isRequired && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}</span>
               </label>
             </Col>
             <Col span={20}>
@@ -149,6 +190,8 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                     value={node.state.value}
                     onChange={handleChange}
                     options={node.state.options || options}
+                    status={node.state.errorMessage ? 'error' : undefined}
+                    disabled={node.state.disabled}
                     {...itemProps}
                   />
                 ) : control === "input" ? (
@@ -156,6 +199,8 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                     {...itemProps}
                     value={node.state.value}
                     onChange={(e) => handleChange(e.target.value)}
+                    status={node.state.errorMessage ? 'error' : undefined}
+                    disabled={node.state.disabled}
                   />
                 ) : control === "radio" ? (
                   <Radio.Group
@@ -163,47 +208,52 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                     options={node.state.options || options}
                     onChange={(e) => handleChange(e.target.value)}
                   />
+                ) : control === "select" ? (
+                  <Select
+                    style={{ width: '100%' }}
+                    value={node.state.value}
+                    options={node.state.options || options}
+                    onChange={(value) => handleChange(value)}
+                    placeholder="请选择"
+                    status={node.state.errorMessage ? 'error' : undefined}
+                    disabled={node.state.disabled}
+                    {...itemProps}
+                  />
                 ) : null}
 
               </div>
+              {node.state.errorMessage &&
+                <div style={{ color: '#ff4d4f', fontSize: '13px' }}>
+                  {node.state.errorMessage}
+                </div>}
             </Col>
           </Row>
-        </div>
-        {/* 错误信息显示区域 */}
-        { node.state.errorMessage &&
-          <Row>
-            <Col offset={4} span={20}>
-              <div style={{ color: '#ff4d4f', fontSize: '13px'}}>
-                {node.state.errorMessage}
-              </div>
-            </Col>
-          </Row>}
+          </Col>
+        </Row>
       </React.Fragment>
     );
   };
 
   return (
-    <Card className="max-w-5xl mx-auto mt-6">
-      <Divider />
-      <ConfigProvider 
+    <>
+      <ConfigProvider
         theme={{
           components: {
             Alert: {
-              defaultPadding: '2px 7px' 
+              defaultPadding: '2px 7px'
             }
           },
           token: { borderRadiusLG: 3, borderRadius: 2 }
         }}
       >
-        <div style={{ padding: '24px 0' }}>
-          <Space size="small" direction="vertical" style={{ width: "100%" }}>
+        <div>
+          <Flex gap={24} vertical={true} style={{ width: "100%" }}>
             {displayFields.map(path => renderField(Array.isArray(path) ? path : [path]))}
-          </Space>
-          
+          </Flex>
+
           <Divider />
         </div>
       </ConfigProvider>
-      <Divider />
       <Alert
         type="info"
         message="调试：内部对象快照"
@@ -217,7 +267,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
           </pre>
         }
       />
-    </Card>
+  </>
   );
 };
 
