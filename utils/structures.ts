@@ -8,79 +8,20 @@
 
 // ----------------------------- 内部模型层 -----------------------------
 import { z, ZodType, ZodError } from "zod";
-import { ComponentType } from "react";
-
-type FieldKey = string;
-
-type FieldPath = FieldKey[];
-type FieldValue = any; // 可扩展为数组等
-
-type ControlType = "input" | "radio" | "select"
-  | ComponentType<{
-    value?: FieldValue, onChange?: (value: FieldValue) => void,
-    [key: string]: any
-  }>; // 自定义渲染表单组件，用户也可以传入自己的组件渲染
-
-interface FieldSchema {
-  key: FieldKey;
-  label?: string;
-  validate?: ZodType;
-  control?: ControlType;
-  // 对于枚举型的字段组件：提供 options
-  options?: Array<{ label: string; value: string | number | boolean }>;
-  // 初始可见性
-  initialVisible?: boolean;
-  // 单独给字段组件设置的prop
-  itemProps?: object;
-  // 默认值
-  defaultValue?: FieldValue;
-  // 帮助说明
-  helpTip?: string | JSX.Element;
-  // 嵌套子字段
-  childrenFields?: FieldSchema[];
-  // 字段是否禁用
-  disabled?: boolean;
-}
-
-
-interface FieldWithStateSchema {
-  key: FieldKey;
-  path: FieldPath;
-  state?: FieldState;
-  schemaData?: Omit<FieldSchema, 'key' | 'validate'>;
-  effect?: ReflectiveEffect[];
-  // 递归
-  children: FieldWithStateSchema[];
-  // 校验对象的缓存，是全量的，不考虑分页（部分校验），只考虑是否可见
-  cache?: {
-    zodObj?: ZodType
-  }
-}
-
-// 存放字段运行时的响应式字段
-interface FieldState {
-  value?: FieldValue;
-  visible: boolean; // 是否显示，响应式触发
-  options: Array<{ label: string; value: string | number | boolean }>;
-  alertTip?: string;
-  errorMessage?: string;
-  validation?: ZodType; // 响应式校验规则
-  disabled: boolean; // 字段组件是否被禁用
-}
-
-interface FormSchema {
-  fields: FieldSchema[];
-}
-
-type ReflectiveEffect = (ctx: {
-  get: (path: FieldPath) => FieldValue;
-  set: (path: FieldPath | FieldPath[], prop: keyof FieldState, value: FieldValue) => void;
-}) => void;
-
-interface ReactiveRule {
-  deps: FieldPath[]; 
-  fn: ReflectiveEffect;
-}
+import type {
+  FieldKey,
+  FieldPath,
+  FieldValue,
+  ControlType,
+  FieldSchema,
+  FieldState,
+  FormSchema,
+  ReactiveEffect,
+  ReactiveRule,
+  FieldWithStateSchema,
+  // 向后兼容
+  ReflectiveEffect
+} from "./legacy-types";
 
 /** 内部对象：管理值与可见性、规则注册与触发 */
 class FormModel {
@@ -699,14 +640,4 @@ class FormModel {
 
 export {
     FormModel
-};
-export type {
-    FieldPath,
-    FieldKey,
-    FieldValue,
-    FieldSchema,
-    FormSchema,
-    FieldState,
-    ControlType,
-    FieldWithStateSchema
 };

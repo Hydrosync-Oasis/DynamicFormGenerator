@@ -1,6 +1,6 @@
 import { ConfigProvider, Divider, Alert, Card, Col, Radio, Row, Space, Input, Select, Tooltip, Flex } from "antd";
 import React, { useState, useEffect, ComponentType } from "react";
-import { FieldPath, FieldSchema, FieldValue, FormModel } from "./structures";
+import type {  FieldPath, FieldSchema, FieldValue, FormModel } from "./index";
 import { ZodType } from "zod";
 import { InfoCircleOutlined } from "@ant-design/icons";
 
