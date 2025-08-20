@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { Button, Card, Tag, Space, Divider, Alert } from 'antd';
-import { FormModel, FormSchema, FieldValue } from '../utils/structures';
+import { FormSchema, FieldValue } from '../utils/legacy-types';
+import { FormModel } from '@/utils';
 import { Generator, useDynamicForm } from '../utils/generator';
 import * as z from 'zod';
 
