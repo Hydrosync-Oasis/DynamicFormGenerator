@@ -22,7 +22,7 @@ type ControlType = "input" | "radio" | "select"
   }>; // 自定义渲染表单组件，用户也可以传入自己的组件渲染
 
 interface FieldSchema {
-  key?: FieldKey;
+  key: FieldKey;
   label?: string;
   // 是否是包含字段的数组
   isArray?: boolean;
@@ -89,6 +89,46 @@ interface ReactiveRule {
   fn: ReactiveEffect;
 }
 
+function copyOneNode(item: FieldSchema, path: FieldPath): FieldWithStateSchema {
+  const res: FieldWithStateSchema = {
+    key: item.key,
+    path: path, //[...seenPath, item.key],
+    isArray: item.isArray,
+    state: {
+      value: item.defaultValue,
+      visible: item.initialVisible ?? true,
+      options: item.options ?? [],
+      validation: item.validate || z.unknown().nonoptional({ message: '请填写！' }),
+      disabled: item.disabled ?? false
+    },
+    schemaData: {
+      label: item.label,
+      options: item.options ?? [],
+      initialVisible: item.initialVisible,
+      itemProps: item.itemProps,
+      control: item.control,
+      helpTip: item.helpTip,
+    },
+    children: []
+  }
+
+  if (item.childrenFields) {
+    // 说明是嵌套字段，本身没有值
+    res.schemaData = undefined;
+    res.state = undefined;
+  }
+
+  return res;
+}
+
+const copyNodes = (schema: FieldSchema, structure: FieldWithStateSchema, seenPath: FieldPath) => {
+  for (let item of schema.childrenFields || []) {
+    const newNode: FieldWithStateSchema = copyOneNode(item, [...seenPath, item.key]);
+    copyNodes(item, newNode, [...seenPath, item.key]);
+    structure.children.push(newNode)
+  }
+}
+
 /** 内部对象：管理值与可见性、规则注册与触发 */
 class FormModel {
   private compiledData: FieldWithStateSchema;
@@ -96,6 +136,8 @@ class FormModel {
   private listeners = new Set<(stateSchema: FieldWithStateSchema[]) => void>();
 
   private rules: ReactiveRule[] = [];
+
+
 
   constructor(schema: FormSchema) {
     // schema是一个递归结构，接下来将schema转换为stateStructure
@@ -107,52 +149,7 @@ class FormModel {
     };
 
     // 复制结点，从原始数据到内部带有State和Schema的结构化数据
-    const copyOneNode = (item: FieldSchema, path: FieldPath): FieldWithStateSchema => {
-      const res: FieldWithStateSchema = {
-        key: item.key!,
-        path: path, //[...seenPath, item.key],
-        isArray: item.isArray,
-        state: {
-          value: item.defaultValue,
-          visible: item.initialVisible ?? true,
-          options: item.options ?? [],
-          validation: item.validate || z.unknown().nonoptional({ message: '请填写！' }),
-          disabled: item.disabled ?? false
-        },
-        schemaData: {
-          label: item.label,
-          options: item.options ?? [],
-          initialVisible: item.initialVisible,
-          itemProps: item.itemProps,
-          control: item.control,
-          helpTip: item.helpTip,
-        },
-        children: []
-      }
-
-      if (item.childrenFields && item.childrenFields.length > 0) {
-        // 说明是嵌套字段，本身没有值
-        res.schemaData = undefined;
-        res.state = undefined;
-      }
-
-      return res;
-    }
-
-    const dfs = (schema: FieldSchema, structure: FieldWithStateSchema, seenPath: FieldPath) => {
-      let i = 0;
-      for (let item of schema.childrenFields || []) {
-        if (!item.key) {
-          item.key = i.toString();
-        }
-        const newNode: FieldWithStateSchema = copyOneNode(item, [...seenPath, item.key]);
-        dfs(item, newNode, [...seenPath, item.key]);
-        structure.children.push(newNode)
-        i++;
-      }
-    }
-
-    dfs({
+    copyNodes({
       childrenFields: schema.fields,
       key: ''
     }, this.compiledData, []);
@@ -216,45 +213,60 @@ class FormModel {
   }
 
   /** 设置响应式属性的函数 */
-  set = (path: FieldPath, prop: keyof FieldProp, value: any) => {
+  set = (path: FieldPath, prop: keyof FieldState, value: any) => {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error('the field is not found:' + path);
-    if (prop !== "children") {
-      // 如果是叶子节点（没有子节点），直接设置
-      if (node.state && (!node.children || node.children.length === 0)) {
-        node.state[prop] = value;
+    // 如果是叶子节点（没有子节点），直接设置
+    if (node.state && (!node.children || node.children.length === 0)) {
+      node.state[prop] = value;
 
-        // 如果设置的是校验规则，清除整个路径的缓存并触发重建
-        if (prop === 'validation') {
-          this.clearPathCache(path);
-          this.rebuildDynamicSchema();
-        } else if (prop === 'value') { // 值变化后，触发依赖该字段的规则
-          this.triggerRulesFor(path);
-        } else if (prop === 'visible') {
-          this.rebuildDynamicSchema();
-        }
-
+      // 如果设置的是校验规则，清除整个路径的缓存并触发重建
+      if (prop === 'validation') {
+        this.clearPathCache(path);
+        this.rebuildDynamicSchema();
+      } else if (prop === 'value') { // 值变化后，触发依赖该字段的规则
+        this.triggerRulesFor(path);
       } else if (prop === 'visible') {
-        // 如果是非叶子节点，批量设置所有叶子节点
-        for (const item of node.children) {
-          this.set(item.path, prop, value);
-        }
-      } else {
-        throw new Error('invalid set operation');
+        this.rebuildDynamicSchema();
+      }
+
+    } else if (prop === 'visible') {
+      // 如果是非叶子节点，批量设置所有叶子节点
+      for (const item of node.children) {
+        this.set(item.path, prop, value);
       }
     } else {
-      // 设置数组内容
-      if (!node.isArray) {
-        throw new Error("only array-type fields can retrieve child nodes.");
-      }
-
-      node.children = value;
+      throw new Error('invalid set operation');
     }
-
     this.rebuildDynamicSchema();
 
     this.notify();
   };
+
+  updateChildren(path: FieldPath, value: FieldSchema[], option?: {
+    keepPreviousData?: boolean
+  }) {
+    const node = this.findNodeByPath(path);
+    if (!node) {
+      throw new Error('the field is not found:' + path);
+    }
+    if (option && option.keepPreviousData) {
+
+    } else {
+      const dummySource: FieldSchema = {
+        key: "dummy",
+        childrenFields: value
+      }
+      const dummyTarget: FieldWithStateSchema = {
+        key: "dummy",
+        path: ["dummy"],
+        children: [],
+      };
+      copyNodes(dummySource, dummyTarget, path);
+
+      node.children = dummyTarget.children;
+    }
+  }
 
 
   /** 清除指定路径及其所有父路径的缓存 */

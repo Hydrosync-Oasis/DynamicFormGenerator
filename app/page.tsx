@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo } from "react";
 import { Typography, Divider, Card } from "antd";
 import { Generator } from "../utils/generator";
-import { FormModel, FormSchema } from "../utils/structures";
+import { FieldSchema, FormModel, FormSchema } from "../utils/structures";
 import { z } from "zod";
 
 const { Title, Paragraph, Text } = Typography;
@@ -23,7 +23,7 @@ export default function Page() {
         },
         {
           key: "machines",
-          label: "机器配置（随 IP 动态生成）",
+          // label: "机器配置（随 IP 动态生成）",
           isArray: true,
           // 初始无子项；每次根据 ips 全量 set(children)
           childrenFields: [],
@@ -55,46 +55,27 @@ export default function Page() {
 
       // 构建每个 IP 对应的一组配置（os 下拉 + remark 输入）
       const groups = ips.map((ip) => {
-        const osNode: any = {
+        const osNode: FieldSchema = {
           key: "os",
-          path: ["machines", ip, "os"],
-          state: {
-            value: "linux",
-            visible: true,
-            options: osOptions,
-            validation: z.string().min(1, "请选择操作系统"),
-            disabled: false,
-          },
-          schemaData: {
-            label: `操作系统（${ip}）`,
-            control: "select",
-            options: osOptions,
-          },
-          children: [],
+          defaultValue: "linux",
+          options: osOptions,
+          validate: z.string().min(1, "请选择操作系统"),
+          disabled: false,
+          label: `操作系统（${ip}）`,
+          control: "select",
         };
 
-        const remarkNode: any = {
+        const remarkNode: FieldSchema = {
           key: "remark",
-          path: ["machines", ip, "remark"],
-          state: {
-            value: "",
-            visible: true,
-            options: [],
-            validation: z.string().optional(),
-            disabled: false,
-          },
-          schemaData: {
-            label: `备注（${ip}）`,
-            control: "input",
-          },
-          children: [],
+          validate: z.string().optional(),
+          label: `备注（${ip}）`,
+          control: "input",
         };
 
-        const groupNode: any = {
+        const groupNode: FieldSchema = {
           key: ip,
-          path: ["machines", ip],
           // 非叶子容器，无 state/schemaData，仅承载子字段
-          children: [osNode, remarkNode],
+          childrenFields: [osNode, remarkNode],
         };
 
         return groupNode;
@@ -102,12 +83,13 @@ export default function Page() {
 
       // 全量替换 children（不保留旧值）
       // 注意：规则上下文的 set 仅允许 FieldState 的键，这里需要直接使用 model.set 来设置 children
-      model.set(["machines"], "children", groups);
+      model.updateChildren(["machines"], groups);
     });
 
     // 初始化一次
     model.runAllRules();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    console.log(model.getSnapshot());
   }, [model]);
 
   return (

@@ -113,12 +113,17 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
     if (!node) return null;
 
     // 如果有子节点，那么当前节点并无内容，仅渲染子节点
-    if (node.children.length > 0) {
-      return (
-        <React.Fragment key={path.join(".")}>
-          {node.children.map((child) => renderField([...path, child.key]))}
-        </React.Fragment>
-      );
+    if (!node.schemaData) {
+      // schemaData只有叶子结点有
+      if (node.children.length > 0) {
+        return (
+          <React.Fragment key={path.join(".")}>
+            {node.children.map((child) => renderField([...path, child.key]))}
+          </React.Fragment>
+        );
+      } else {
+        return <React.Fragment key={path.join(".")}></React.Fragment>;
+      }
     }
 
     // 叶子节点才渲染UI
