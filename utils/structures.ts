@@ -71,6 +71,10 @@ interface FieldState {
   disabled: boolean; // 字段组件是否被禁用
 }
 
+type FieldProp = {
+  children: FieldSchema[]
+} & FieldState
+
 interface FormSchema {
   fields: FieldSchema[];
 }
@@ -190,45 +194,63 @@ class FormModel {
     );
   }
 
-  get(path: FieldPath, prop: keyof FieldState = 'value'): any {
+  get(path: FieldPath, prop: keyof FieldProp = 'value'): any {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error('the field is not found');
     if (!node.state) throw new Error('node has no state: ' + path.join('.'));
 
-    // 对于非叶子节点，如果要获取value，返回undefined或者抛出错误
-    if (prop === 'value' && node.children && node.children.length > 0) {
-      throw new Error('cannot get value from non-leaf node: ' + path.join('.'));
-    }
+    if (prop === "children") {
+      if (node.isArray) {
+        return node.children;
+      } else {
+        throw new Error("only array-type fields can retrieve child nodes.")
+      }
+    } else {
+      // 对于非叶子节点，如果要获取value，返回undefined或者抛出错误
+      if (prop === 'value' && node.children && node.children.length > 0) {
+        throw new Error('cannot get value from non-leaf node: ' + path.join('.'));
+      }
 
-    return node.state[prop];
+      return node.state[prop];
+    }
   }
 
   /** 设置响应式属性的函数 */
-  set = (path: FieldPath, prop: keyof FieldState, value: any) => {
+  set = (path: FieldPath, prop: keyof FieldProp, value: any) => {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error('the field is not found:' + path);
-    // 如果是叶子节点（没有子节点），直接设置
-    if (node.state && (!node.children || node.children.length === 0)) {
-      node.state[prop] = value;
+    if (prop !== "children") {
+      // 如果是叶子节点（没有子节点），直接设置
+      if (node.state && (!node.children || node.children.length === 0)) {
+        node.state[prop] = value;
 
-      // 如果设置的是校验规则，清除整个路径的缓存并触发重建
-      if (prop === 'validation') {
-        this.clearPathCache(path);
-        this.rebuildDynamicSchema();
-      } else if (prop === 'value') { // 值变化后，触发依赖该字段的规则
-        this.triggerRulesFor(path);
+        // 如果设置的是校验规则，清除整个路径的缓存并触发重建
+        if (prop === 'validation') {
+          this.clearPathCache(path);
+          this.rebuildDynamicSchema();
+        } else if (prop === 'value') { // 值变化后，触发依赖该字段的规则
+          this.triggerRulesFor(path);
+        } else if (prop === 'visible') {
+          this.rebuildDynamicSchema();
+        }
+
       } else if (prop === 'visible') {
-        this.rebuildDynamicSchema();
-      }
-
-    } else if (prop === 'visible') {
-      // 如果是非叶子节点，批量设置所有叶子节点
-      for (const item of node.children) {
-        this.set(item.path, prop, value);
+        // 如果是非叶子节点，批量设置所有叶子节点
+        for (const item of node.children) {
+          this.set(item.path, prop, value);
+        }
+      } else {
+        throw new Error('invalid set operation');
       }
     } else {
-      throw new Error('invalid set operation');
+      // 设置数组内容
+      if (!node.isArray) {
+        throw new Error("only array-type fields can retrieve child nodes.");
+      }
+
+      node.children = value;
     }
+
     this.rebuildDynamicSchema();
 
     this.notify();
