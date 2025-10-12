@@ -1,379 +1,225 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
-import { Button, Card, Tag, Space, Divider, Alert } from 'antd';
-import { FormModel, FormSchema, FieldValue } from '../utils/structures';
-import { Generator, useDynamicForm } from '../utils/generator';
-import * as z from 'zod';
+import React, { useEffect, useMemo, useState } from "react";
+import { Button, Steps, Space, message, Typography, Divider, Card } from "antd";
+import { Generator, useDynamicForm } from "../utils/generator";
+import { FormModel, FieldPath, FormSchema } from "../utils/structures";
+import { z } from "zod";
 
-// 创建响应式校验规则演示的表单Schema
-const responsiveValidationSchema: FormSchema = {
-  fields: [
-    {
-      key: 'profile',
-      label: '用户档案',
-      childrenFields: [
+const { Title, Paragraph, Text } = Typography;
+
+export default function Page() {
+  // 1) 定义表单结构 Schema（包含多步骤会用到的字段分组）
+  const schema = useMemo<FormSchema>(
+    () => ({
+      fields: [
         {
-          key: 'name',
-          label: '姓名',
-          control: 'input',
-          validate: z.string().min(2, '姓名至少2个字符'),
-          defaultValue: 'Tom',
-          itemProps: { placeholder: '请输入姓名' }
-        },
-        {
-          key: 'age',
-          label: '年龄',
-          control: 'input',
-          validate: z.number().min(1, '年龄必须大于0').max(120, '年龄不能超过120'),
-          defaultValue: 25,
-          itemProps: { type: 'number', placeholder: '请输入年龄' }
-        },
-        {
-          key: 'email',
-          label: '邮箱',
-          control: 'input',
-          validate: z.string().email('请输入有效的邮箱地址'),
-          defaultValue: 'tom@example.com',
-          itemProps: { placeholder: '请输入邮箱' }
-        }
-      ]
-    },
-    {
-      key: 'settings',
-      label: '设置',
-      childrenFields: [
-        {
-          key: 'level',
-          label: '用户等级',
-          control: 'radio',
-          validate: z.enum(['basic', 'premium', 'vip']),
-          defaultValue: 'basic',
-          options: [
-            { label: '基础用户', value: 'basic' },
-            { label: '高级用户', value: 'premium' },
-            { label: 'VIP用户', value: 'vip' }
-          ]
-        },
-        {
-          key: 'creditLimit',
-          label: '信用额度',
-          control: 'input',
-          validate: z.number().min(0, '信用额度不能为负数'),
-          defaultValue: 1000,
-          itemProps: { type: 'number', placeholder: '请输入信用额度' }
-        }
-      ]
-    }
-  ]
-};
-
-
-export default function ResponsiveValidationDemo() {
-  const [currentRule, setCurrentRule] = useState<string>('default');
-  const [validationStatus, setValidationStatus] = useState<string>('');
-  
-  const [model, _] = useState(new FormModel(responsiveValidationSchema));
-  
-  // 创建表单模型
-  const form = useDynamicForm(model);
-
-  // 获取要显示的字段路径
-  const displayFields = model.getAllLeafPaths();
-
-  // 响应式校验规则演示集合
-  const validationRules = {
-    default: {
-      name: '默认校验',
-      description: '使用表单定义时的默认校验规则',
-      action: () => {
-        // 清除所有响应式校验规则，恢复默认
-        model.set(['profile', 'name'], 'validation', undefined);
-        model.set(['profile', 'age'], 'validation', undefined);
-        model.set(['profile', 'email'], 'validation', undefined);
-        model.set(['settings', 'creditLimit'], 'validation', undefined);
-      }
-    },
-    strict: {
-      name: '严格模式',
-      description: '更严格的校验规则',
-      action: () => {
-        model.setFieldValidation(['profile', 'name'], 
-          z.string().min(3, '姓名至少3个字符').max(10, '姓名不能超过10个字符')
-        );
-        model.setFieldValidation(['profile', 'age'], 
-          z.number().int('年龄必须是整数').min(18, '必须年满18岁').max(65, '年龄不能超过65岁')
-        );
-        model.setFieldValidation(['profile', 'email'], 
-          z.string().email('无效邮箱格式').refine(val => val.includes('@company.com'), {
-            message: '只允许公司邮箱(@company.com)'
-          })
-        );
-      }
-    },
-    dynamic: {
-      name: '动态规则',
-      description: '根据用户等级动态调整校验规则',
-      action: () => {
-        const userLevel = model.get(['settings', 'level'], 'value');
-        
-        if (userLevel === 'vip') {
-          model.setFieldValidation(['settings', 'creditLimit'], 
-            z.number().min(10000, 'VIP用户信用额度至少10000')
-          );
-          model.setFieldValidation(['profile', 'name'], 
-            z.string().min(2, 'VIP用户姓名至少2个字符').regex(/^[A-Za-z\s]+$/, 'VIP用户姓名只能包含英文字母')
-          );
-        } else if (userLevel === 'premium') {
-          model.setFieldValidation(['settings', 'creditLimit'], 
-            z.number().min(5000, '高级用户信用额度至少5000')
-          );
-          model.setFieldValidation(['profile', 'name'], 
-            z.string().min(2, '姓名至少2个字符')
-          );
-        } else {
-          model.setFieldValidation(['settings', 'creditLimit'], 
-            z.number().max(2000, '基础用户信用额度不能超过2000')
-          );
-          model.setFieldValidation(['profile', 'name'], 
-            z.string().min(2, '姓名至少2个字符')
-          );
-        }
-      }
-    },
-    crossField: {
-      name: '跨字段校验',
-      description: '年龄和信用额度的关联校验',
-      action: () => {
-        // 这个规则通过validateFieldsWithEnhancer来实现
-        model.setFieldValidation(['profile', 'age'], 
-          z.number().min(18, '年龄必须大于18岁')
-        );
-        model.setFieldValidation(['settings', 'creditLimit'], 
-          z.number().min(0, '信用额度不能为负数')
-        );
-      }
-    }
-  };
-
-  // 应用选中的校验规则
-  const applyValidationRule = (ruleKey: string) => {
-    setCurrentRule(ruleKey);
-    validationRules[ruleKey as keyof typeof validationRules].action();
-    setValidationStatus(`已应用 ${validationRules[ruleKey as keyof typeof validationRules].name}`);
-    
-    // 如果是动态规则，需要监听用户等级变化
-    if (ruleKey === 'dynamic') {
-      // 注册响应式规则来监听用户等级变化
-      model.registerRule(({ get, set }) => {
-        const level = get(['settings', 'level']);
-        if (level) {
-          validationRules.dynamic.action();
-        }
-      });
-    }
-  };
-
-  // 验证表单
-  const validateForm = async () => {
-    try {
-      if (currentRule === 'crossField') {
-        // 使用跨字段校验
-        await model.validateFieldsWithEnhancer(
-          [['profile', 'age'], ['settings', 'creditLimit']],
-          (schema) => schema.refine(
-            (data: any) => {
-              const age = data.profile?.age || 0;
-              const creditLimit = data.settings?.creditLimit || 0;
-              // 年龄越大，允许的信用额度越高
-              const maxCredit = age * 1000;
-              return creditLimit <= maxCredit;
+          key: "basic",
+          label: "基础信息",
+          childrenFields: [
+            {
+              key: "name",
+              label: "姓名",
+              control: "input",
+              validate: z.string().min(1, "请填写姓名"),
+              helpTip: "用于展示在你的资料卡上",
+              defaultValue: "",
             },
             {
-              message: '信用额度不能超过年龄×1000',
-              path: ['settings', 'creditLimit']
-            }
-          )
-        );
-      } else {
-        await model.validateAllFields();
-      }
-      setValidationStatus('✅ 表单验证通过！');
-    } catch (error) {
-      setValidationStatus('❌ 表单验证失败，请查看错误提示');
-      console.error('Validation error:', error);
-    }
-  };
+              key: "role",
+              label: "角色",
+              control: "select",
+              options: [
+                { label: "学生", value: "student" },
+                { label: "上班族", value: "worker" },
+                { label: "其他", value: "other" },
+              ],
+              validate: z.string(),
+              defaultValue: "student",
+              helpTip: "不同角色会影响需要填写的内容",
+            },
+            {
+              key: "school",
+              label: "学校",
+              control: "input",
+              validate: z.string().min(1, "请填写学校"),
+              initialVisible: false,
+              helpTip: "当选择“学生”时需要填写",
+              defaultValue: "",
+            },
+          ],
+        },
+        {
+          key: "contact",
+          label: "联系信息",
+          childrenFields: [
+            {
+              key: "email",
+              label: "邮箱",
+              control: "input",
+              validate: z
+                .string()
+                .email({ message: "邮箱格式不正确" })
+                .min(1, "请填写邮箱"),
+              defaultValue: "",
+            },
+            {
+              key: "confirmEmail",
+              label: "确认邮箱",
+              control: "input",
+              // 初始简单规则，真正的动态规则会在下面的 reactive rule 中设置
+              validate: z.string().min(1, "请再次输入邮箱"),
+              helpTip: "需要与邮箱保持一致（动态校验示例）",
+              defaultValue: "",
+            },
+          ],
+        },
+        {
+          key: "payment",
+          label: "支付设置",
+          childrenFields: [
+            {
+              key: "amount",
+              label: "预算金额",
+              control: "input",
+              // 将字符串转数字再做校验
+              validate: z.coerce.number().min(0, "金额需≥0"),
+              helpTip: "不同角色对最低预算有不同要求（动态校验示例）",
+              defaultValue: "0",
+            },
+          ],
+        },
+      ],
+    }),
+    []
+  );
 
-  // 重置表单
-  const resetForm = () => {
-    model.set(['profile', 'name'], 'value', 'Tom');
-    model.set(['profile', 'age'], 'value', 25);
-    model.set(['profile', 'email'], 'value', 'tom@example.com');
-    model.set(['settings', 'level'], 'value', 'basic');
-    model.set(['settings', 'creditLimit'], 'value', 1000);
-    
-    // 清除所有错误信息
-    displayFields.forEach(path => {
-      model.set(path, 'errorMessage', undefined);
+  // 2) 初始化模型 & 注册规则（仅创建一次）
+  const model = useMemo(() => new FormModel(schema), [schema]);
+
+  useEffect(() => {
+    // 规则 A：角色为“学生”时显示并要求“学校”，否则隐藏
+    model.registerRule(({ get, set }) => {
+      const role = get(["basic", "role"]) as string | undefined;
+      const isStudent = role === "student";
+      set(["basic", "school"], "visible", isStudent);
+      set(
+        ["basic", "school"],
+        "validation",
+        isStudent
+          ? z.string().min(1, "学生需要填写学校")
+          : z.string().optional()
+      );
     });
-    
-    setValidationStatus('表单已重置');
+
+    // 规则 B：确认邮箱需要与邮箱一致（动态校验规则示例）
+    model.registerRule(({ get, set }) => {
+      const email = (get(["contact", "email"]) as string) ?? "";
+      set(
+        ["contact", "confirmEmail"],
+        "validation",
+        z
+          .string()
+          .min(1, "请再次输入邮箱")
+          .refine((v) => v === email, { message: "两次邮箱不一致" })
+      );
+    });
+
+    // 规则 C：不同角色对金额有不同最低要求
+    model.registerRule(({ get, set }) => {
+      const role = get(["basic", "role"]) as string | undefined;
+      const minByRole = role === "worker" ? 100 : 0;
+      set(
+        ["payment", "amount"],
+        "validation",
+        z.coerce.number().min(minByRole, `金额需≥${minByRole}`)
+      );
+    });
+
+    // 初始执行一次所有规则，确保初始状态正确
+    model.runAllRules();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model]);
+
+  // 3) 多步骤分页渲染配置
+  const steps: { title: string; fields: FieldPath[] }[] = [
+    {
+      title: "基础信息",
+      fields: [["basic"]],
+    },
+    {
+      title: "联系信息",
+      fields: [["contact"]],
+    },
+    {
+      title: "支付设置",
+      fields: [["payment"]],
+    },
+  ];
+
+  const [current, setCurrent] = useState(0);
+  const form = useDynamicForm(model);
+
+  const next = async () => {
+    try {
+      console.log(model.getSnapshot());
+      await form.validateFields(steps[current].fields);
+      setCurrent((c) => c + 1);
+    } catch (e) {
+      message.error("请修正本页校验错误后再继续");
+    }
   };
 
-  // 填充测试数据
-  const fillTestData = (scenario: string) => {
-    switch (scenario) {
-      case 'valid':
-        model.set(['profile', 'name'], 'value', 'Alice Johnson');
-        model.set(['profile', 'age'], 'value', 30);
-        model.set(['profile', 'email'], 'value', 'alice@company.com');
-        model.set(['settings', 'level'], 'value', 'premium');
-        model.set(['settings', 'creditLimit'], 'value', 8000);
-        break;
-      case 'invalid':
-        model.set(['profile', 'name'], 'value', 'A');
-        model.set(['profile', 'age'], 'value', 16);
-        model.set(['profile', 'email'], 'value', 'invalid-email');
-        model.set(['settings', 'level'], 'value', 'vip');
-        model.set(['settings', 'creditLimit'], 'value', 50000);
-        break;
-      case 'crossFieldTest':
-        model.set(['profile', 'age'], 'value', 20);
-        model.set(['settings', 'creditLimit'], 'value', 25000); // 超过 20*1000
-        break;
+  const prev = () => setCurrent((c) => c - 1);
+
+  const submitAll = async () => {
+    try {
+      await form.validateAllFields();
+      const data = model.getJSONData();
+      message.success({ content: "提交成功，见控制台与下方快照", duration: 2 });
+      // 控制台输出，方便查看
+      // eslint-disable-next-line no-console
+      console.log("提交数据:", data);
+    } catch (e) {
+      message.error("请修正表单中的错误后再提交");
     }
-    setValidationStatus('测试数据已填充');
   };
 
   return (
-    <div style={{ padding: '20px', backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
-      <Card title="🚀 响应式校验规则演示" style={{ marginBottom: '20px' }}>
-        <div style={{ marginBottom: '24px' }}>
-          <h3>🎯 功能演示：</h3>
-          <p>这个演示展示了如何动态设置和切换字段的校验规则，实现响应式校验。</p>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginTop: '16px' }}>
-            {Object.entries(validationRules).map(([key, rule]) => (
-              <Card 
-                key={key}
-                size="small" 
-                title={rule.name}
-                bordered={false}
-                style={{ 
-                  backgroundColor: currentRule === key ? '#e6f7ff' : '#fafafa',
-                  border: currentRule === key ? '1px solid #1890ff' : '1px solid #d9d9d9'
-                }}
-              >
-                <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: '#666' }}>
-                  {rule.description}
-                </p>
-                <Button 
-                  size="small"
-                  type={currentRule === key ? 'primary' : 'default'}
-                  onClick={() => applyValidationRule(key)}
-                  block
-                >
-                  {currentRule === key ? '已应用' : '应用规则'}
-                </Button>
-              </Card>
-            ))}
-          </div>
-        </div>
+    <div style={{ padding: 24 }}>
+      <Title level={3}>动态表单生成器 - 分页 Demo</Title>
+      <Paragraph type="secondary">
+        本示例演示：多步骤分页、依赖显隐规则（角色→学校）、动态校验规则（确认邮箱与邮箱一致；不同角色的金额下限）。
+      </Paragraph>
 
-        <Divider />
+      <Card style={{ marginTop: 12 }}>
+        <Steps
+          current={current}
+          items={steps.map((s) => ({ title: s.title }))}
+        />
+        <Divider style={{ margin: "16px 0" }} />
 
-        <div style={{ marginBottom: '16px' }}>
-          <strong>🎮 操作演示：</strong>
-          <div style={{ marginTop: '12px' }}>
-            <Space wrap size="middle">
-              <Button onClick={() => fillTestData('valid')} type="primary" ghost>
-                📝 填充有效数据
-              </Button>
-              <Button onClick={() => fillTestData('invalid')} danger ghost>
-                ⚠️ 填充无效数据
-              </Button>
-              <Button onClick={() => fillTestData('crossFieldTest')} type="dashed">
-                🔗 跨字段测试数据
-              </Button>
-              <Button onClick={validateForm} type="primary">
-                ✅ 验证表单
-              </Button>
-              <Button onClick={resetForm}>
-                🔄 重置表单
-              </Button>
-            </Space>
-          </div>
-          
-          {validationStatus && (
-            <Alert 
-              message={validationStatus} 
-              type={validationStatus.includes('✅') ? 'success' : validationStatus.includes('❌') ? 'error' : 'info'}
-              style={{ marginTop: '12px' }}
-              showIcon
-            />
+        <Generator model={model} displayFields={steps[current].fields} />
+
+        <Space style={{ marginTop: 12 }}>
+          {current > 0 && <Button onClick={prev}>上一步</Button>}
+          {current < steps.length - 1 && (
+            <Button type="primary" onClick={next}>
+              下一步
+            </Button>
           )}
-        </div>
-
-        <Divider />
-
-        <div>
-          <strong>📋 使用说明：</strong>
-          <ol style={{ marginTop: '8px', marginBottom: 0 }}>
-            <li><strong>默认校验：</strong>使用表单定义时的基础校验规则</li>
-            <li><strong>严格模式：</strong>应用更严格的校验规则，如公司邮箱限制</li>
-            <li><strong>动态规则：</strong>根据用户等级自动调整校验规则</li>
-            <li><strong>跨字段校验：</strong>实现字段间的关联校验（年龄×1000 ≥ 信用额度）</li>
-            <li><strong>实时反馈：</strong>所有校验规则都会实时生效并显示错误信息</li>
-          </ol>
-        </div>
+          {current === steps.length - 1 && (
+            <Button type="primary" onClick={submitAll}>
+              提交
+            </Button>
+          )}
+        </Space>
       </Card>
 
-      {/* 主表单区域 */}
-      <Generator
-        model={model}
-        displayFields={displayFields}
-      />
-
-      {/* 当前状态显示 */}
-      <Card title="🔧 当前状态" style={{ marginTop: '20px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
-          <div>
-            <h4>📊 当前校验规则</h4>
-            <Tag color={currentRule === 'default' ? 'default' : 'blue'} style={{ fontSize: '14px' }}>
-              {validationRules[currentRule as keyof typeof validationRules].name}
-            </Tag>
-            <p style={{ marginTop: '8px', fontSize: '13px', color: '#666' }}>
-              {validationRules[currentRule as keyof typeof validationRules].description}
-            </p>
-          </div>
-          
-          <div>
-            <h4>📋 表单数据</h4>
-            <div style={{ 
-              backgroundColor: '#f8f8f8', 
-              padding: '12px', 
-              borderRadius: '4px',
-              maxHeight: '200px',
-              overflow: 'auto'
-            }}>
-              <pre style={{ margin: 0, fontSize: '12px' }}>
-                {JSON.stringify(model.getJSONData(), null, 2)}
-              </pre>
-            </div>
-          </div>
-          
-          <div>
-            <h4>🎯 实用提示</h4>
-            <ul style={{ fontSize: '13px', color: '#666', margin: 0, paddingLeft: '16px' }}>
-              <li>切换用户等级观察动态规则变化</li>
-              <li>在严格模式下尝试输入非公司邮箱</li>
-              <li>使用跨字段测试观察关联校验</li>
-              <li>查看错误信息的实时更新</li>
-            </ul>
-          </div>
-        </div>
-      </Card>
+      <Divider />
+      <Text type="secondary">
+        提示：下方“调试：内部对象快照”会实时显示可见字段的 JSON 值。
+      </Text>
     </div>
   );
 }
