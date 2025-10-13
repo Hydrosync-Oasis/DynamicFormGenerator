@@ -9,7 +9,7 @@ import { z } from "zod";
 const { Title, Paragraph, Text } = Typography;
 
 export default function Page() {
-  // 单步骤：一个输入框(逗号分隔IP) + 一个数组字段“machines”，其子字段通过 set(path, "children") 全量生成
+  // 单步骤：一个输入框(逗号分隔IP) + 一个数组字段“machines”，其子字段通过 updateChildren 全量生成
   const schema = useMemo<FormSchema>(
     () => ({
       fields: [
@@ -23,7 +23,6 @@ export default function Page() {
         },
         {
           key: "machines",
-          // label: "机器配置（随 IP 动态生成）",
           isArray: true,
           // 初始无子项；每次根据 ips 全量 set(children)
           childrenFields: [],
@@ -48,23 +47,10 @@ export default function Page() {
         )
       );
 
-      const osOptions = [
-        { label: "Windows", value: "windows" },
-        { label: "Linux", value: "linux" },
-      ];
+      // 移除旧示例中的 OS 选项
 
       // 构建每个 IP 对应的一组配置（os 下拉 + remark 输入）
       const groups = ips.map((ip) => {
-        const osNode: FieldSchema = {
-          key: "os",
-          defaultValue: "linux",
-          options: osOptions,
-          validate: z.string().min(1, "请选择操作系统"),
-          disabled: false,
-          label: `操作系统（${ip}）`,
-          control: "select",
-        };
-
         const remarkNode: FieldSchema = {
           key: "remark",
           validate: z.string().optional(),
@@ -72,10 +58,32 @@ export default function Page() {
           control: "input",
         };
 
+        const autoNode: FieldSchema = {
+          key: "autoFindPath",
+          label: `是否自动寻找路径（${ip}）`,
+          control: "radio",
+          options: [
+            { label: "是", value: true },
+            { label: "否", value: false },
+          ],
+          validate: z.boolean(),
+          defaultValue: true,
+        };
+
+        const pathNode: FieldSchema = {
+          key: "path",
+          label: `路径（${ip}）`,
+          control: "input",
+          helpTip: "当未自动寻找路径时，请手动填写绝对路径",
+          validate: z.string().min(1, "请填写路径"),
+          defaultValue: "",
+          initialVisible: false, // 默认根据 auto=true 隐藏
+        };
+
         const groupNode: FieldSchema = {
           key: ip,
           // 非叶子容器，无 state/schemaData，仅承载子字段
-          childrenFields: [osNode, remarkNode],
+          childrenFields: [remarkNode, autoNode, pathNode],
         };
 
         return groupNode;
@@ -83,7 +91,18 @@ export default function Page() {
 
       // 全量替换 children（不保留旧值）
       // 注意：规则上下文的 set 仅允许 FieldState 的键，这里需要直接使用 model.set 来设置 children
-      model.updateChildren(["machines"], groups);
+      model.updateChildren(["machines"], groups, { keepPreviousData: true });
+
+      // 为每个 IP 的 autoFindPath 注册可见性联动规则：auto=false 时显示 path
+      ips.forEach((ip) => {
+        model.registerRule(({ get, set }) => {
+          const auto = get(["machines", ip, "autoFindPath"]) as
+            | boolean
+            | undefined;
+          // 收集依赖并设置可见性
+          set(["machines", ip, "path"], "visible", auto === false);
+        });
+      });
     });
 
     // 初始化一次
@@ -94,11 +113,11 @@ export default function Page() {
 
   return (
     <div style={{ padding: 24 }}>
-      <Title level={3}>机器配置（基于 IP 动态生成）</Title>
+      <Title level={3}>按 IP 动态生成嵌套表单</Title>
       <Paragraph type="secondary">
-        输入逗号分隔的机器 IP，系统会为每个 IP
-        生成一组配置字段（操作系统、备注），并通过
-        <Text code>set(path, "children")</Text> 全量替换。
+        输入逗号分隔的机器 IP。对于每个 IP，将在数组字段下生成一个嵌套表单：
+        备注、是否自动寻找路径，以及在选择“否”时显示的“路径”。 使用
+        <Text code>updateChildren</Text>全量替换子字段，并用规则控制字段显隐。
       </Paragraph>
 
       <Card style={{ marginTop: 12 }}>

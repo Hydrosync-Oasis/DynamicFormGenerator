@@ -51,7 +51,7 @@ const useDynamicForm2 = (model: FormModel) => {
     },
     submit: async () => {
       await model.validateAllFields();
-      return model.getJSONData();
+      return model.getJSONData(true);
     },
     getFieldValue: (path: FieldPath) => {
       return model.get(path, "value");
@@ -316,7 +316,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
         message="调试：内部对象快照"
         description={
           <pre style={{ whiteSpace: "pre-wrap" }}>
-            {JSON.stringify(model.getJSONData(), null, 2)}
+            {JSON.stringify(model.getJSONData(true), null, 2)}
           </pre>
         }
       />

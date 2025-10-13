@@ -1,3 +1,5 @@
+
+
 /** 目前的表单完成情况：
  * 核心部分：
  * 1) 内部对象：存字段键、值、以及"是否显示"visible；用 immer 做 set/get。
@@ -15,10 +17,14 @@ type FieldKey = string;
 type FieldPath = FieldKey[];
 type FieldValue = any; // 可扩展为数组等
 
-type ControlType = "input" | "radio" | "select"
+type ControlType =
+  | "input"
+  | "radio"
+  | "select"
   | ComponentType<{
-    value?: FieldValue, onChange?: (value: FieldValue) => void,
-    [key: string]: any
+    value?: FieldValue;
+    onChange?: (value: FieldValue) => void;
+    [key: string]: any;
   }>; // 自定义渲染表单组件，用户也可以传入自己的组件渲染
 
 interface FieldSchema {
@@ -44,20 +50,26 @@ interface FieldSchema {
   disabled?: boolean;
 }
 
+class NodeChildrenCache {
+  public value: Record<string, NodeChildrenCache | FieldValue> = {};
+}
 
-interface FieldWithStateSchema {
+interface NodeCache {
+  zodObj?: ZodType;
+  children?: NodeChildrenCache;
+}
+
+interface CompiledFieldNode {
   key: FieldKey;
   path: FieldPath;
   state?: FieldState;
   isArray?: boolean;
-  schemaData?: Omit<FieldSchema, 'key' | 'validate'>;
+  schemaData?: Omit<FieldSchema, "key" | "validate">;
   effect?: ReactiveEffect[];
   // 递归
-  children: FieldWithStateSchema[];
+  children: CompiledFieldNode[];
   // 校验对象的缓存，是全量的，不考虑分页（部分校验），只考虑是否可见
-  cache?: {
-    zodObj?: ZodType
-  }
+  cache?: NodeCache;
 }
 
 // 存放字段运行时的响应式字段
@@ -72,8 +84,8 @@ interface FieldState {
 }
 
 type FieldProp = {
-  children: FieldSchema[]
-} & FieldState
+  children: FieldSchema[];
+} & FieldState;
 
 interface FormSchema {
   fields: FieldSchema[];
@@ -81,7 +93,11 @@ interface FormSchema {
 
 type ReactiveEffect = (ctx: {
   get: (path: FieldPath) => FieldValue;
-  set: (path: FieldPath | FieldPath[], prop: keyof FieldState, value: FieldValue) => void;
+  set: (
+    path: FieldPath | FieldPath[],
+    prop: keyof FieldState,
+    value: FieldValue
+  ) => void;
 }) => void;
 
 interface ReactiveRule {
@@ -89,8 +105,8 @@ interface ReactiveRule {
   fn: ReactiveEffect;
 }
 
-function copyOneNode(item: FieldSchema, path: FieldPath): FieldWithStateSchema {
-  const res: FieldWithStateSchema = {
+function copyOneNode(item: FieldSchema, path: FieldPath): CompiledFieldNode {
+  const res: CompiledFieldNode = {
     key: item.key,
     path: path, //[...seenPath, item.key],
     isArray: item.isArray,
@@ -98,8 +114,9 @@ function copyOneNode(item: FieldSchema, path: FieldPath): FieldWithStateSchema {
       value: item.defaultValue,
       visible: item.initialVisible ?? true,
       options: item.options ?? [],
-      validation: item.validate || z.unknown().nonoptional({ message: '请填写！' }),
-      disabled: item.disabled ?? false
+      validation:
+        item.validate || z.unknown().nonoptional({ message: "请填写！" }),
+      disabled: item.disabled ?? false,
     },
     schemaData: {
       label: item.label,
@@ -109,8 +126,8 @@ function copyOneNode(item: FieldSchema, path: FieldPath): FieldWithStateSchema {
       control: item.control,
       helpTip: item.helpTip,
     },
-    children: []
-  }
+    children: [],
+  };
 
   if (item.childrenFields) {
     // 说明是嵌套字段，本身没有值
@@ -121,50 +138,63 @@ function copyOneNode(item: FieldSchema, path: FieldPath): FieldWithStateSchema {
   return res;
 }
 
-const copyNodes = (schema: FieldSchema, structure: FieldWithStateSchema, seenPath: FieldPath) => {
+const copyNodes = (
+  schema: FieldSchema,
+  structure: CompiledFieldNode,
+  seenPath: FieldPath
+) => {
   for (let item of schema.childrenFields || []) {
-    const newNode: FieldWithStateSchema = copyOneNode(item, [...seenPath, item.key]);
+    const newNode: CompiledFieldNode = copyOneNode(item, [
+      ...seenPath,
+      item.key,
+    ]);
     copyNodes(item, newNode, [...seenPath, item.key]);
-    structure.children.push(newNode)
+    structure.children.push(newNode);
   }
-}
+};
 
 /** 内部对象：管理值与可见性、规则注册与触发 */
 class FormModel {
-  private compiledData: FieldWithStateSchema;
+  private compiledData: CompiledFieldNode;
 
-  private listeners = new Set<(stateSchema: FieldWithStateSchema[]) => void>();
+  private listeners = new Set<(stateSchema: CompiledFieldNode[]) => void>();
 
   private rules: ReactiveRule[] = [];
 
-
+  public onChange?: (path: FieldPath, value: FieldValue) => void;
 
   constructor(schema: FormSchema) {
     // schema是一个递归结构，接下来将schema转换为stateStructure
     // 此处使用虚拟根结点，用于简化代码，这样就不需要手动复制树的第一层了
     this.compiledData = {
-      key: 'dummy',
-      path: ['dummy'],
-      children: []
+      key: "dummy",
+      path: ["dummy"],
+      children: [],
     };
 
     // 复制结点，从原始数据到内部带有State和Schema的结构化数据
-    copyNodes({
-      childrenFields: schema.fields,
-      key: ''
-    }, this.compiledData, []);
+    copyNodes(
+      {
+        childrenFields: schema.fields,
+        key: "",
+      },
+      this.compiledData,
+      []
+    );
 
     // 构建并缓存所有的 zod schema
     this.rebuildDynamicSchema();
   }
 
-  public findNodeByPath(path: FieldPath): FieldWithStateSchema | undefined {
+  public findNodeByPath(path: FieldPath): CompiledFieldNode | undefined {
     if (path.length === 0) {
       return this.compiledData;
     }
-    let curObj: FieldWithStateSchema | undefined = this.compiledData.children.find((x) => {
-      return x.key === path[0]
-    });
+    let curObj: CompiledFieldNode | undefined = this.compiledData.children.find(
+      (x) => {
+        return x.key === path[0];
+      }
+    );
     if (!curObj) return undefined;
 
     if (path.length === 1) {
@@ -173,8 +203,8 @@ class FormModel {
       for (let i = 1; i < path.length; i++) {
         if (!curObj) return undefined;
         curObj = curObj?.children.find((x) => {
-          return x.key === path[i]
-        })
+          return x.key === path[i];
+        });
       }
       return curObj;
     }
@@ -186,26 +216,26 @@ class FormModel {
   }
 
   private notify() {
-    for (const fn of this.listeners) fn(
-      this.compiledData.children
-    );
+    for (const fn of this.listeners) fn(this.compiledData.children);
   }
 
-  get(path: FieldPath, prop: keyof FieldProp = 'value'): any {
+  get(path: FieldPath, prop: keyof FieldProp = "value"): any {
     const node = this.findNodeByPath(path);
-    if (!node) throw new Error('the field is not found');
-    if (!node.state) throw new Error('node has no state: ' + path.join('.'));
+    if (!node) throw new Error("the field is not found");
+    if (!node.state) throw new Error("node has no state: " + path.join("."));
 
     if (prop === "children") {
       if (node.isArray) {
         return node.children;
       } else {
-        throw new Error("only array-type fields can retrieve child nodes.")
+        throw new Error("only array-type fields can retrieve child nodes.");
       }
     } else {
       // 对于非叶子节点，如果要获取value，返回undefined或者抛出错误
-      if (prop === 'value' && node.children && node.children.length > 0) {
-        throw new Error('cannot get value from non-leaf node: ' + path.join('.'));
+      if (prop === "value" && node.children && node.children.length > 0) {
+        throw new Error(
+          "cannot get value from non-leaf node: " + path.join(".")
+        );
       }
 
       return node.state[prop];
@@ -215,62 +245,131 @@ class FormModel {
   /** 设置响应式属性的函数 */
   set = (path: FieldPath, prop: keyof FieldState, value: any) => {
     const node = this.findNodeByPath(path);
-    if (!node) throw new Error('the field is not found:' + path);
+
+    if (!node) throw new Error("the field is not found:" + path);
     // 如果是叶子节点（没有子节点），直接设置
     if (node.state && (!node.children || node.children.length === 0)) {
       node.state[prop] = value;
 
       // 如果设置的是校验规则，清除整个路径的缓存并触发重建
-      if (prop === 'validation') {
-        this.clearPathCache(path);
+      if (prop === "validation") {
+        this.clearPathZodCache(path);
         this.rebuildDynamicSchema();
-      } else if (prop === 'value') { // 值变化后，触发依赖该字段的规则
+      } else if (prop === "value") {
+        // 值变化后，触发依赖该字段的规则
         this.triggerRulesFor(path);
-      } else if (prop === 'visible') {
+        this.onChange?.(path, value);
+      } else if (prop === "visible") {
         this.rebuildDynamicSchema();
       }
-
-    } else if (prop === 'visible') {
+    } else if (prop === "visible") {
       // 如果是非叶子节点，批量设置所有叶子节点
       for (const item of node.children) {
         this.set(item.path, prop, value);
       }
     } else {
-      throw new Error('invalid set operation');
+      throw new Error("invalid set operation");
     }
     this.rebuildDynamicSchema();
 
     this.notify();
   };
 
-  updateChildren(path: FieldPath, value: FieldSchema[], option?: {
-    keepPreviousData?: boolean
-  }) {
+  /**
+   *
+   * @param path 数组型嵌套字段的路径
+   * @param value 内部字段（可继续嵌套）
+   * @param option 选项配置对象
+   */
+  updateChildren(
+    path: FieldPath,
+    value: FieldSchema[],
+    option?: {
+      keepPreviousData?: boolean;
+    }
+  ) {
     const node = this.findNodeByPath(path);
     if (!node) {
-      throw new Error('the field is not found:' + path);
+      throw new Error("the field is not found:" + path);
     }
-    if (option && option.keepPreviousData) {
 
-    } else {
-      const dummySource: FieldSchema = {
-        key: "dummy",
-        childrenFields: value
+    // 生成新节点
+    const dummySource: FieldSchema = {
+      key: "dummy",
+      childrenFields: value,
+    };
+    const dummyTarget: CompiledFieldNode = {
+      key: "dummy",
+      path: ["dummy"],
+      children: [],
+    };
+    copyNodes(dummySource, dummyTarget, path);
+
+    // 遍历target树，一边遍历一边从缓存里找对应节点，并尝试复制value，结构不一致不会报错，但也不会复制
+    const dfsFindCache = (
+      target: CompiledFieldNode,
+      cache: NodeChildrenCache
+    ) => {
+      if (!cache.value) {
+        return;
       }
-      const dummyTarget: FieldWithStateSchema = {
-        key: "dummy",
-        path: ["dummy"],
-        children: [],
-      };
-      copyNodes(dummySource, dummyTarget, path);
-
-      node.children = dummyTarget.children;
+      if (target.state) {
+        // 叶子结点
+        if (cache && !(cache.value instanceof NodeChildrenCache)) {
+          target.state.value = cache.value;
+        }
+      } else {
+        for (let childTarget of target.children) {
+          const childCache = Object.entries(cache.value).find((x) => {
+            return x[0] === childTarget.key;
+          })?.[1];
+          if (childCache && childCache instanceof NodeChildrenCache) {
+            dfsFindCache(childTarget, childCache);
+          }
+        }
+      }
+    };
+    if (node.cache?.children && option && option.keepPreviousData) {
+      dfsFindCache(dummyTarget, node.cache?.children);
     }
+    // 不管是否使用缓存，都要把新来的存一下
+    if (!node.cache) {
+      node.cache = {};
+    }
+    if (!node.cache.children) {
+      node.cache.children = new NodeChildrenCache();
+    }
+    // 生成缓存的函数
+    const dfsGenerateCache = (
+      curNode: CompiledFieldNode,
+      cache: NodeChildrenCache
+    ) => {
+      if (curNode.state) {
+        // 叶子结点了
+        cache.value = curNode.state.value;
+        return;
+      }
+
+      for (let i of curNode.children) {
+        if (!cache.value) {
+          cache.value = {};
+        }
+        if (!(cache.value[i.key] instanceof NodeChildrenCache)) {
+          cache.value[i.key] = new NodeChildrenCache();
+        }
+        dfsGenerateCache(i, cache.value[i.key]);
+      }
+    };
+    dfsGenerateCache(node, node.cache.children);
+
+    // 更新
+    node.children = dummyTarget.children;
+    this.clearPathZodCache(path);
+    this.notify();
   }
 
-
   /** 清除指定路径及其所有父路径的缓存 */
-  private clearPathCache(path: FieldPath) {
+  private clearPathZodCache(path: FieldPath) {
     // 清除从根到指定路径的所有节点缓存
     for (let i = 0; i <= path.length; i++) {
       const currentPath = path.slice(0, i);
@@ -281,7 +380,7 @@ class FormModel {
     }
   }
 
-  getSnapshot(): FieldWithStateSchema[] {
+  getSnapshot(): CompiledFieldNode[] {
     return this.compiledData.children;
   }
 
@@ -299,7 +398,7 @@ class FormModel {
     // 建 dep 索引
     rule.deps.forEach((dep) => {
       const node = this.findNodeByPath(dep);
-      if (!node) throw new Error('the field is not found');
+      if (!node) throw new Error("the field is not found");
       if (!node.effect) node.effect = [];
       node.effect.push(rule.fn);
     });
@@ -307,9 +406,11 @@ class FormModel {
 
   /** 主动触发一次全量规则（初始化时可用） */
   runAllRules() {
-    this.runEffects(this.rules.map((r) => {
-      return r.fn
-    }));
+    this.runEffects(
+      this.rules.map((r) => {
+        return r.fn;
+      })
+    );
   }
 
   /**
@@ -319,21 +420,21 @@ class FormModel {
   private runEffects(effects: ReactiveEffect[]) {
     for (const effect of effects) {
       effect({
-        get: (k) => this.get(k, 'value'),
+        get: (k) => this.get(k, "value"),
         set: (key, prop, value) => {
           if (Array.isArray(key) && Array.isArray(key[0])) {
             (key as FieldPath[]).forEach((k) => {
               this.set(k, prop, value);
               if (prop === "validation" || prop === "visible") {
                 // 如果设置的是校验规则
-                this.clearPathCache(k);
+                this.clearPathZodCache(k);
               }
-            })
+            });
           } else if (Array.isArray(key)) {
             this.set(key as FieldPath, prop, value);
             if (prop === "validation" || prop === "visible") {
               // 如果设置的是校验规则
-              this.clearPathCache(key as FieldPath);
+              this.clearPathZodCache(key as FieldPath);
             }
           }
         },
@@ -344,38 +445,34 @@ class FormModel {
 
   private triggerRulesFor(depFieldPath: FieldPath) {
     const node = this.findNodeByPath(depFieldPath);
-    if (!node) throw new Error('the field is not found')
+    if (!node) throw new Error("the field is not found");
     const list = node.effect;
     if (!list) return;
     this.runEffects(list);
   }
 
-
   /**
    * 获取所有叶子节点的路径数组
    * @returns 二维数组，每个内部数组代表一个叶子节点的完整路径
    */
-  getAllLeafPaths(): FieldPath[] {
+  getAllLeafPaths(node: CompiledFieldNode): FieldPath[] {
     const result: FieldPath[] = [];
 
-    const collectLeafPaths = (node: FieldWithStateSchema) => {
+    const collectLeafPaths = (node: CompiledFieldNode) => {
       // 如果是叶子节点（没有子节点或子节点为空）
       if (!node.children || node.children.length === 0) {
         result.push([...node.path]); // 添加当前节点的路径到结果中
       }
       // 如果有子节点，递归处理
       else if (node.children && node.children.length > 0) {
-        node.children.forEach(child => {
+        node.children.forEach((child) => {
           collectLeafPaths(child);
         });
       }
     };
 
     // 处理顶层节点
-    this.compiledData.children.forEach(node => {
-      collectLeafPaths(node);
-    });
-
+    collectLeafPaths(node);
     return result;
   }
 
@@ -384,23 +481,33 @@ class FormModel {
    * 全量JSON
    * @returns 保持嵌套结构的数据对象
    */
-  getJSONData(): Record<string, any> {
+  getJSONData(shouldGenerateArray: boolean): Record<string, any> {
     const result: Record<string, any> = {};
 
-    const processNode = (node: FieldWithStateSchema, currentObj: Record<string, any>) => {
+    const processNode = (
+      node: CompiledFieldNode,
+      currentObj: Record<string, any>
+    ) => {
       // 如果是叶子节点（没有子节点或子节点为空）且节点可见，则添加值
-      if ((!node.children || node.children.length === 0) && node.state?.visible) {
-        currentObj[node.key] = node.state.value;
+      if (
+        (!node.children || node.children.length === 0) &&
+        node.state?.visible
+      ) {
+        if (Array.isArray(currentObj)) {
+          currentObj.push(node.state.value);
+        } else {
+          currentObj[node.key] = node.state.value;
+        }
       }
       // 如果有子节点，创建嵌套对象并递归处理
       else if (node.children && node.children.length > 0) {
         // 只有当节点可见时才处理其子节点
         if (node.state?.visible !== false) {
           let nestedObj: Record<string, any> = {};
-          if (node.isArray) {
+          if (node.isArray && shouldGenerateArray) {
             nestedObj = [];
           }
-          node.children.forEach(child => {
+          node.children.forEach((child) => {
             processNode(child, nestedObj);
           });
 
@@ -417,7 +524,7 @@ class FormModel {
     };
 
     // 处理顶层节点
-    this.compiledData.children.forEach(node => {
+    this.compiledData.children.forEach((node) => {
       processNode(node, result);
     });
 
@@ -432,7 +539,7 @@ class FormModel {
   validateField(path: FieldPath): Promise<any> {
     const node = this.findNodeByPath(path);
     if (!node || !node.state) {
-      return Promise.reject(new Error('Field not found or has no state'));
+      return Promise.reject(new Error("Field not found or has no state"));
     }
 
     // 优先使用响应式校验规则，否则使用缓存的 schema
@@ -440,21 +547,21 @@ class FormModel {
 
     if (!schema) {
       // 没有校验规则时，直接通过
-      this.set(path, 'errorMessage', undefined);
+      this.set(path, "errorMessage", undefined);
       return Promise.resolve(node.state.value);
     }
 
     try {
       const result = schema.parse(node.state.value);
       // 校验成功，清除错误信息
-      this.set(path, 'errorMessage', undefined);
+      this.set(path, "errorMessage", undefined);
       return Promise.resolve(result);
     } catch (error) {
       // 校验失败，设置错误信息
       if (error instanceof ZodError) {
         const firstError = error.issues[0];
-        const errorMessage = firstError?.message || 'Validation failed';
-        this.set(path, 'errorMessage', errorMessage);
+        const errorMessage = firstError?.message || "Validation failed";
+        this.set(path, "errorMessage", errorMessage);
       }
       return Promise.reject(error);
     }
@@ -477,19 +584,19 @@ class FormModel {
     if (!paths || paths.length === 0) return Promise.resolve({});
 
     // 收集对应节点（假定传入的是叶子节点路径）
-    const targetNodeSet = new Set<FieldWithStateSchema>();
+    const targetNodeSet = new Set<CompiledFieldNode>();
     for (const p of paths) {
       const node = this.findNodeByPath(p);
-      if (!node) throw new Error('field not found: ' + p.join('.'));
+      if (!node) throw new Error("field not found: " + p.join("."));
       if (node.children && node.children.length > 0) {
-        throw new Error('path is not a leaf field: ' + p.join('.'));
+        throw new Error("path is not a leaf field: " + p.join("."));
       }
       targetNodeSet.add(node);
     }
 
     type BuildResult = { schema?: ZodType; data?: any; included: boolean };
 
-    const build = (node: FieldWithStateSchema): BuildResult => {
+    const build = (node: CompiledFieldNode): BuildResult => {
       // 叶子节点
       if (!node.children || node.children.length === 0) {
         if (targetNodeSet.has(node)) {
@@ -528,7 +635,11 @@ class FormModel {
 
     // 先清理这些字段的旧错误
     for (const p of paths) {
-      try { this.set(p, 'errorMessage', undefined); } catch {/* ignore */ }
+      try {
+        this.set(p, "errorMessage", undefined);
+      } catch {
+        /* ignore */
+      }
     }
 
     try {
@@ -538,7 +649,11 @@ class FormModel {
       if (err instanceof ZodError) {
         for (const issue of err.issues) {
           const issuePath = issue.path.map(String) as FieldPath;
-          try { this.set(issuePath, 'errorMessage', issue.message); } catch {/* ignore non-leaf */ }
+          try {
+            this.set(issuePath, "errorMessage", issue.message);
+          } catch {
+            /* ignore non-leaf */
+          }
         }
       }
       return Promise.reject(err);
@@ -548,7 +663,7 @@ class FormModel {
   /** 重新构建 schema（当字段可见性发生变化后应再次调用，全量构建，不分页） ，用于验证整个表单*/
   private rebuildDynamicSchema(): ZodType | null {
     // 递归构建考虑可见性的 zod schema
-    const buildDynamicZodSchema = (node: FieldWithStateSchema): ZodType | null => {
+    const buildDynamicZodSchema = (node: CompiledFieldNode): ZodType | null => {
       // 如果节点不可见，返回null代表无校验规则
       if (node.state && !node.state.visible) {
         return null;
@@ -578,14 +693,20 @@ class FormModel {
           }
         }
 
-
         // 将子字段按顺序放入 tuple，支持异质数组校验
         const tupleItems = (node.children || [])
           .map((c) => shape[c.key])
           .filter((s) => !!s);
-        const zodObj = Object.keys(shape).length > 0
-          ? (node.isArray ? z.tuple(tupleItems as any) : z.object(shape))
-          : z.unknown().nonoptional();
+        const zodObj =
+          Object.keys(shape).length > 0
+            ? z.object(shape)
+            : z.unknown().nonoptional();
+        // Object.keys(shape).length > 0
+        //   ? node.isArray
+        //     ? z.tuple(tupleItems as any)
+        //     :
+        //     z.object(shape)
+        //   : z.unknown().nonoptional();
 
         if (!node.cache) {
           node.cache = {};
@@ -623,16 +744,16 @@ class FormModel {
     const form = this.compiledData;
 
     // 先清空所有字段的错误信息
-    const allLeafPaths = this.getAllLeafPaths();
-    allLeafPaths.forEach(path => {
-      this.set(path, 'errorMessage', undefined);
+    const allLeafPaths = this.getAllLeafPaths(this.compiledData);
+    allLeafPaths.forEach((path) => {
+      this.set(path, "errorMessage", undefined);
     });
     console.log(this.compiledData);
 
     try {
       const data = {
-        [this.compiledData.key]: this.getJSONData()
-      }
+        [this.compiledData.key]: this.getJSONData(false),
+      };
 
       // 应用增强函数（如果提供）
       let finalSchema = dynamicSchema;
@@ -649,7 +770,7 @@ class FormModel {
         // 处理验证错误，设置对应字段的错误信息
         error.issues.forEach((issue) => {
           const path = issue.path.map(String); // 将路径转换为字符串数组
-          this.set(path.slice(1), 'errorMessage', issue.message);
+          this.set(path.slice(1), "errorMessage", issue.message);
         });
       }
       return Promise.reject(error);
@@ -657,9 +778,7 @@ class FormModel {
   }
 }
 
-export {
-  FormModel
-};
+export { FormModel };
 export type {
   FieldPath,
   FieldKey,
@@ -668,5 +787,5 @@ export type {
   FormSchema,
   FieldState,
   ControlType,
-  FieldWithStateSchema
+  CompiledFieldNode as FieldWithStateSchema,
 };
