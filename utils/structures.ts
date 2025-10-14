@@ -51,7 +51,8 @@ interface FieldSchema {
 }
 
 class NodeChildrenCache {
-  public value: Record<string, NodeChildrenCache | FieldValue> = {};
+  public child: Record<string, NodeChildrenCache> = {};
+  public value: FieldValue;
 }
 
 interface NodeCache {
@@ -105,7 +106,7 @@ interface ReactiveRule {
   fn: ReactiveEffect;
 }
 
-function copyOneNode(item: FieldSchema, path: FieldPath): CompiledFieldNode {
+function compileOneNode(item: FieldSchema, path: FieldPath): CompiledFieldNode {
   const res: CompiledFieldNode = {
     key: item.key,
     path: path, //[...seenPath, item.key],
@@ -138,17 +139,17 @@ function copyOneNode(item: FieldSchema, path: FieldPath): CompiledFieldNode {
   return res;
 }
 
-const copyNodes = (
+const compileNodes = (
   schema: FieldSchema,
   structure: CompiledFieldNode,
   seenPath: FieldPath
 ) => {
   for (let item of schema.childrenFields || []) {
-    const newNode: CompiledFieldNode = copyOneNode(item, [
+    const newNode: CompiledFieldNode = compileOneNode(item, [
       ...seenPath,
       item.key,
     ]);
-    copyNodes(item, newNode, [...seenPath, item.key]);
+    compileNodes(item, newNode, [...seenPath, item.key]);
     structure.children.push(newNode);
   }
 };
@@ -173,7 +174,7 @@ class FormModel {
     };
 
     // 复制结点，从原始数据到内部带有State和Schema的结构化数据
-    copyNodes(
+    compileNodes(
       {
         childrenFields: schema.fields,
         key: "",
@@ -222,7 +223,6 @@ class FormModel {
   get(path: FieldPath, prop: keyof FieldProp = "value"): any {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error("the field is not found");
-    if (!node.state) throw new Error("node has no state: " + path.join("."));
 
     if (prop === "children") {
       if (node.isArray) {
@@ -231,6 +231,7 @@ class FormModel {
         throw new Error("only array-type fields can retrieve child nodes.");
       }
     } else {
+      if (!node.state) throw new Error("node has no state: " + path.join("."));
       // 对于非叶子节点，如果要获取value，返回undefined或者抛出错误
       if (prop === "value" && node.children && node.children.length > 0) {
         throw new Error(
@@ -298,29 +299,31 @@ class FormModel {
       key: "dummy",
       childrenFields: value,
     };
+    // 编译后的节点，值全部为空
     const dummyTarget: CompiledFieldNode = {
       key: "dummy",
       path: ["dummy"],
       children: [],
     };
-    copyNodes(dummySource, dummyTarget, path);
+    compileNodes(dummySource, dummyTarget, path);
 
     // 遍历target树，一边遍历一边从缓存里找对应节点，并尝试复制value，结构不一致不会报错，但也不会复制
     const dfsFindCache = (
       target: CompiledFieldNode,
       cache: NodeChildrenCache
     ) => {
-      if (!cache.value) {
+      if (!cache.child) {
         return;
       }
       if (target.state) {
         // 叶子结点
-        if (cache && !(cache.value instanceof NodeChildrenCache)) {
+        if (cache && !(cache.child instanceof NodeChildrenCache)) {
           target.state.value = cache.value;
+          console.log(cache.child);
         }
       } else {
         for (let childTarget of target.children) {
-          const childCache = Object.entries(cache.value).find((x) => {
+          const childCache = Object.entries(cache.child).find((x) => {
             return x[0] === childTarget.key;
           })?.[1];
           if (childCache && childCache instanceof NodeChildrenCache) {
@@ -329,9 +332,6 @@ class FormModel {
         }
       }
     };
-    if (node.cache?.children && option && option.keepPreviousData) {
-      dfsFindCache(dummyTarget, node.cache?.children);
-    }
     // 不管是否使用缓存，都要把新来的存一下
     if (!node.cache) {
       node.cache = {};
@@ -339,6 +339,7 @@ class FormModel {
     if (!node.cache.children) {
       node.cache.children = new NodeChildrenCache();
     }
+
     // 生成缓存的函数
     const dfsGenerateCache = (
       curNode: CompiledFieldNode,
@@ -351,17 +352,23 @@ class FormModel {
       }
 
       for (let i of curNode.children) {
-        if (!cache.value) {
-          cache.value = {};
+        if (!cache.child) {
+          cache.child = {};
         }
-        if (!(cache.value[i.key] instanceof NodeChildrenCache)) {
-          cache.value[i.key] = new NodeChildrenCache();
+        if (!(cache.child[i.key] instanceof NodeChildrenCache)) {
+          cache.child[i.key] = new NodeChildrenCache();
         }
-        dfsGenerateCache(i, cache.value[i.key]);
+        dfsGenerateCache(i, cache.child[i.key]);
       }
     };
+
     dfsGenerateCache(node, node.cache.children);
 
+
+    if (node.cache?.children && option && option.keepPreviousData) {
+      dfsFindCache(dummyTarget, node.cache?.children);
+
+    }
     // 更新
     node.children = dummyTarget.children;
     this.clearPathZodCache(path);
@@ -693,10 +700,6 @@ class FormModel {
           }
         }
 
-        // 将子字段按顺序放入 tuple，支持异质数组校验
-        const tupleItems = (node.children || [])
-          .map((c) => shape[c.key])
-          .filter((s) => !!s);
         const zodObj =
           Object.keys(shape).length > 0
             ? z.object(shape)
