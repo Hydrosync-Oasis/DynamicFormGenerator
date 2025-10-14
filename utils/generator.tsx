@@ -21,6 +21,8 @@ import { InfoCircleOutlined } from "@ant-design/icons";
 interface GeneratorProps {
   model: FormModel;
   displayFields: FieldPath[];
+  showDebug?: boolean;
+  size?: "small" | "normal";
 }
 
 /** 自定义表单生成器的hook */
@@ -35,13 +37,6 @@ interface DynamicFormHook {
 }
 
 const useDynamicForm2 = (model: FormModel) => {
-  const [, force] = useState({});
-  useEffect(() => {
-    model.subscribe(() => {
-      force({}); // 响应式的最终触发方式
-    });
-  }, [model]);
-
   const hook: DynamicFormHook = {
     validateAllFields: (enhancer?: (schema: ZodType) => ZodType) => {
       return model.validateAllFields(enhancer);
@@ -98,11 +93,16 @@ const useDynamicForm2 = (model: FormModel) => {
   return hook;
 };
 
-const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
+const Generator: React.FC<GeneratorProps> = ({
+  model,
+  displayFields,
+  showDebug,
+  size,
+}) => {
   // 响应式更新
   const [, force] = useState({});
   useEffect(() => {
-    model.subscribe(() => {
+    return model.subscribe(() => {
       force({});
     });
   }, [model]);
@@ -111,6 +111,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
   const renderField = (path: FieldPath): React.ReactNode => {
     const node = model.findNodeByPath(path);
     if (!node) return null;
+    console.log(node);
 
     // 如果有子节点，那么当前节点并无内容，仅渲染子节点
     if (!node.schemaData) {
@@ -156,7 +157,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
 
     // 处理字段值变化的回调
     const handleChange = (value: FieldValue) => {
-      model.set(path, "value", value);
+      model.updateValue(path, value, true);
       // 可选：实时验证
       model.validateField(path).catch(() => {
         // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
@@ -209,7 +210,7 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                 >
                   <span>:</span>
                   <>
-                    {node.schemaData?.helpTip ? (
+                    {node.schemaData?.helpTip && (
                       <>
                         <Tooltip title={node.schemaData.helpTip}>
                           <InfoCircleOutlined
@@ -218,8 +219,6 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
                           />
                         </Tooltip>
                       </>
-                    ) : (
-                      <></>
                     )}
                   </>
                   <span>{label}</span>
@@ -311,15 +310,17 @@ const Generator: React.FC<GeneratorProps> = ({ model, displayFields }) => {
           <Divider />
         </div>
       </ConfigProvider>
-      <Alert
-        type="info"
-        message="调试：内部对象快照"
-        description={
-          <pre style={{ whiteSpace: "pre-wrap" }}>
-            {JSON.stringify(model.getJSONData(true), null, 2)}
-          </pre>
-        }
-      />
+      {showDebug && (
+        <Alert
+          type="info"
+          message="调试：内部对象快照"
+          description={
+            <pre style={{ whiteSpace: "pre-wrap" }}>
+              {JSON.stringify(model.getJSONData(true), null, 2)}
+            </pre>
+          }
+        />
+      )}
     </>
   );
 };

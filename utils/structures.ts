@@ -1,5 +1,6 @@
 
 
+
 /** 目前的表单完成情况：
  * 核心部分：
  * 1) 内部对象：存字段键、值、以及"是否显示"visible；用 immer 做 set/get。
@@ -259,7 +260,6 @@ class FormModel {
       } else if (prop === "value") {
         // 值变化后，触发依赖该字段的规则
         this.triggerRulesFor(path);
-        this.onChange?.(path, value);
       } else if (prop === "visible") {
         this.rebuildDynamicSchema();
       }
@@ -275,6 +275,13 @@ class FormModel {
 
     this.notify();
   };
+
+  updateValue(path: FieldPath, value: FieldValue, invokeOnChange: boolean) {
+    this.set(path, "value", value);
+    if (invokeOnChange) {
+      this.onChange?.(path, value);
+    }
+  }
 
   /**
    *
@@ -364,10 +371,8 @@ class FormModel {
 
     dfsGenerateCache(node, node.cache.children);
 
-
     if (node.cache?.children && option && option.keepPreviousData) {
       dfsFindCache(dummyTarget, node.cache?.children);
-
     }
     // 更新
     node.children = dummyTarget.children;
@@ -569,6 +574,7 @@ class FormModel {
         const firstError = error.issues[0];
         const errorMessage = firstError?.message || "Validation failed";
         this.set(path, "errorMessage", errorMessage);
+        console.log(path, this.get(path, "errorMessage"));
       }
       return Promise.reject(error);
     }

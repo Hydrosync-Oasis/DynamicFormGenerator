@@ -5,93 +5,13 @@ import { Typography, Divider, Card } from "antd";
 import { Generator } from "../utils/generator";
 import { FieldSchema, FormModel, FormSchema } from "../utils/structures";
 import { z } from "zod";
+import InnerConfigForm, {
+  InnerConfigValue,
+} from "./components/InnerConfigForm";
 
 const { Title, Paragraph, Text } = Typography;
 
 export default function Page() {
-  // 内嵌表单：作为一个字段值（对象）
-  const InnerConfigField: React.FC<{
-    value?: { remark?: string; autoFindPath?: boolean; path?: string };
-    onChange?: (v: {
-      remark?: string;
-      autoFindPath?: boolean;
-      path?: string;
-    }) => void;
-    disabled?: boolean;
-  }> = ({ value, onChange, disabled }) => {
-    const innerSchema = useMemo<FormSchema>(
-      () => ({
-        fields: [
-          {
-            key: "remark",
-            label: "备注",
-            control: "input",
-            validate: z.string().optional(),
-            defaultValue: value?.remark ?? "",
-          },
-          {
-            key: "autoFindPath",
-            label: "是否自动寻找路径",
-            control: "radio",
-            options: [
-              { label: "是", value: true },
-              { label: "否", value: false },
-            ],
-            validate: z.boolean(),
-            defaultValue: value?.autoFindPath ?? true,
-          },
-          {
-            key: "path",
-            label: "路径",
-            helpTip: "当未自动寻找路径时，请手动填写绝对路径",
-            control: "input",
-            validate: z.string().min(1, "请填写路径"),
-            defaultValue: value?.path ?? "",
-            initialVisible: !(value?.autoFindPath ?? true) ? true : false,
-          },
-        ],
-      }),
-      [value?.remark, value?.autoFindPath, value?.path]
-    );
-
-    const innerModel = useMemo(() => new FormModel(innerSchema), [innerSchema]);
-
-    useEffect(() => {
-      // 建立联动：auto=false 显示 path
-      innerModel.registerRule(({ get, set }) => {
-        const auto = get(["autoFindPath"]) as boolean | undefined;
-        set(["path"], "visible", auto === false);
-      });
-      innerModel.runAllRules();
-
-      // 同步初始值（如果 value 改变）
-      if (value) {
-        innerModel.set(["remark"], "value", value.remark ?? "");
-        innerModel.set(["autoFindPath"], "value", value.autoFindPath ?? true);
-        innerModel.set(["path"], "value", value.path ?? "");
-      }
-
-      // 订阅内表单变化 -> 往外抛出对象值
-      const unsub = (innerModel.onChange = () => {
-        const data = innerModel.getJSONData(true) as any;
-        onChange?.({
-          remark: data.remark,
-          autoFindPath: data.autoFindPath,
-          path: data.path,
-        });
-      });
-      return () => unsub();
-    }, [innerModel, onChange, value]);
-
-    return (
-      <div style={{ opacity: disabled ? 0.6 : 1 }}>
-        <Generator
-          model={innerModel}
-          displayFields={[["remark"], ["autoFindPath"], ["path"]]}
-        />
-      </div>
-    );
-  };
   // 单步骤：一个输入框(逗号分隔IP) + 一个数组字段“machines”，其子字段通过 updateChildren 全量生成
   const schema = useMemo<FormSchema>(
     () => ({
@@ -137,7 +57,11 @@ export default function Page() {
         const configField: FieldSchema = {
           key: "config",
           label: `配置（${ip}）`,
-          control: InnerConfigField,
+          control: InnerConfigForm as unknown as React.ComponentType<{
+            value?: InnerConfigValue;
+            onChange?: (v: InnerConfigValue) => void;
+            disabled?: boolean;
+          }>,
           // 外层对内嵌对象做一次整体校验：当 autoFindPath 为 false 时要求 path 必填
           validate: z
             .object({
@@ -161,7 +85,6 @@ export default function Page() {
         return groupNode;
       });
 
-      console.log(model.get(["machines"], "children"));
       // 全量替换 children（不保留旧值）
       // 注意：规则上下文的 set 仅允许 FieldState 的键，这里需要直接使用 model.set 来设置 children
       model.updateChildren(["machines"], groups, { keepPreviousData: true });
@@ -172,7 +95,6 @@ export default function Page() {
     // 初始化一次
     model.runAllRules();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    console.log(model);
   }, [model]);
 
   return (
