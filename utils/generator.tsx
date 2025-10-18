@@ -18,12 +18,6 @@ import { ZodType } from "zod";
 import { InfoCircleOutlined } from "@ant-design/icons";
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
-interface GeneratorProps {
-  model: FormModel;
-  displayFields: FieldPath[];
-  showDebug?: boolean;
-  size?: "small" | "normal";
-}
 
 /** 自定义表单生成器的hook */
 interface DynamicFormHook {
@@ -93,12 +87,26 @@ const useDynamicForm2 = (model: FormModel) => {
   return hook;
 };
 
-const Generator: React.FC<GeneratorProps> = ({
+const Generator = ({
   model,
   displayFields,
-  showDebug,
   size,
+  labelSpan = 4,
+  fieldSpan = 20,
+  showDebug = false,
+  showInline = false,
+  showLabel = true,
+}: {
+  model: FormModel;
+  displayFields: FieldPath[];
+  size?: "normal" | "small";
+  fieldSpan?: number;
+  labelSpan?: number;
+  showDebug?: boolean;
+  showInline?: boolean;
+  showLabel?: boolean;
 }) => {
+  const isSmall = size === "small";
   // 响应式更新
   const [, force] = useState({});
   useEffect(() => {
@@ -111,7 +119,6 @@ const Generator: React.FC<GeneratorProps> = ({
   const renderField = (path: FieldPath): React.ReactNode => {
     const node = model.findNodeByPath(path);
     if (!node) return null;
-    console.log(node);
 
     // 如果有子节点，那么当前节点并无内容，仅渲染子节点
     if (!node.schemaData) {
@@ -170,7 +177,7 @@ const Generator: React.FC<GeneratorProps> = ({
         <Row>
           <Col span={24}>
             <Row>
-              <Col offset={4} span={20}>
+              <Col offset={labelSpan} span={fieldSpan}>
                 {/* Alert提示框 */}
                 {node.state.alertTip && (
                   <ConfigProvider
@@ -192,11 +199,11 @@ const Generator: React.FC<GeneratorProps> = ({
             </Row>
             <Row align="middle">
               <Col
-                span={4}
+                span={labelSpan}
                 style={{
                   textAlign: "right",
-                  paddingRight: "8px",
-                  lineHeight: "32px",
+                  paddingRight: isSmall ? "4px" : "8px",
+                  lineHeight: isSmall ? "24px" : "32px",
                 }}
               >
                 <label
@@ -210,7 +217,7 @@ const Generator: React.FC<GeneratorProps> = ({
                 >
                   <span>:</span>
                   <>
-                    {node.schemaData?.helpTip && (
+                    {node.schemaData?.helpTip ? (
                       <>
                         <Tooltip title={node.schemaData.helpTip}>
                           <InfoCircleOutlined
@@ -219,6 +226,8 @@ const Generator: React.FC<GeneratorProps> = ({
                           />
                         </Tooltip>
                       </>
+                    ) : (
+                      <></>
                     )}
                   </>
                   <span>{label}</span>
@@ -231,7 +240,7 @@ const Generator: React.FC<GeneratorProps> = ({
                   </span>
                 </label>
               </Col>
-              <Col span={20}>
+              <Col span={fieldSpan}>
                 {/* 三选一逻辑：自定义组件 > 控件类型(input/radio) */}
                 <div>
                   {CustomComponent ? (
@@ -241,12 +250,14 @@ const Generator: React.FC<GeneratorProps> = ({
                       options={node.state.options || options}
                       status={node.state.errorMessage ? "error" : undefined}
                       disabled={node.state.disabled}
+                      size={size === "small" ? "small" : undefined}
                       {...itemProps}
                       id={path.join("/")}
                     />
                   ) : control === "input" ? (
                     <Input
                       {...itemProps}
+                      size={size === "small" ? "small" : undefined}
                       value={node.state.value}
                       onChange={(e) => handleChange(e.target.value)}
                       status={node.state.errorMessage ? "error" : undefined}
@@ -255,6 +266,7 @@ const Generator: React.FC<GeneratorProps> = ({
                     />
                   ) : control === "radio" ? (
                     <Radio.Group
+                      size={size === "small" ? "small" : undefined}
                       value={node.state.value}
                       options={node.state.options || options}
                       onChange={(e) => handleChange(e.target.value)}
@@ -264,6 +276,7 @@ const Generator: React.FC<GeneratorProps> = ({
                   ) : control === "select" ? (
                     <Select
                       style={{ width: "100%" }}
+                      size={size === "small" ? "small" : undefined}
                       value={node.state.value}
                       options={node.state.options || options}
                       onChange={(value) => handleChange(value)}
@@ -276,7 +289,12 @@ const Generator: React.FC<GeneratorProps> = ({
                   ) : null}
                 </div>
                 {node.state.errorMessage && (
-                  <div style={{ color: "#ff4d4f", fontSize: "13px" }}>
+                  <div
+                    style={{
+                      color: "#ff4d4f",
+                      fontSize: isSmall ? "12px" : "13px",
+                    }}
+                  >
                     {node.state.errorMessage}
                   </div>
                 )}
@@ -288,43 +306,70 @@ const Generator: React.FC<GeneratorProps> = ({
     );
   };
 
+  const curNode = model.findNodeByPath(displayFields[0]);
   return (
     <>
       <ConfigProvider
+        componentSize={size === "small" ? "small" : undefined}
         theme={{
           components: {
             Alert: {
-              defaultPadding: "2px 7px",
+              defaultPadding: isSmall ? "1px 6px" : "2px 7px",
             },
           },
           token: { borderRadiusLG: 3, borderRadius: 2 },
         }}
       >
         <div>
-          <Flex gap={24} vertical={true} style={{ width: "100%" }}>
-            {displayFields.map((path) =>
-              renderField(Array.isArray(path) ? path : [path])
-            )}
-          </Flex>
-
-          <Divider />
+          {!showInline ? (
+            <Flex
+              gap={isSmall ? 12 : 24}
+              vertical={true}
+              style={{ width: "100%" }}
+            >
+              {displayFields.map((path) =>
+                renderField(Array.isArray(path) ? path : [path])
+              )}
+            </Flex>
+          ) : (
+            <>
+              {displayFields.length === 1 && (
+                <Space>
+                  {curNode?.children.map((node) => (
+                    <Card
+                      title={curNode.schemaData?.label}
+                      key={node.path.join(".")}
+                    >
+                      <Generator
+                        displayFields={[node.path]}
+                        model={model}
+                        fieldSpan={fieldSpan}
+                        labelSpan={labelSpan}
+                      />
+                    </Card>
+                  ))}
+                </Space>
+              )}
+            </>
+          )}
         </div>
       </ConfigProvider>
       {showDebug && (
-        <Alert
-          type="info"
-          message="调试：内部对象快照"
-          description={
-            <pre style={{ whiteSpace: "pre-wrap" }}>
-              {JSON.stringify(model.getJSONData(true), null, 2)}
-            </pre>
-          }
-        />
+        <>
+          <Divider />
+          <Alert
+            type="info"
+            message="调试：内部对象快照"
+            description={
+              <pre style={{ whiteSpace: "pre-wrap" }}>
+                {JSON.stringify(model.getJSONData(true), null, 2)}
+              </pre>
+            }
+          />
+        </>
       )}
     </>
   );
 };
 
 export { useDynamicForm2 as useDynamicForm, Generator };
-
-export type { GeneratorProps };

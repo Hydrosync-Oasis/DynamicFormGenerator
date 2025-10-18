@@ -1,119 +1,225 @@
 "use client";
 
-import React, { useEffect, useMemo } from "react";
-import { Typography, Divider, Card } from "antd";
-import { Generator } from "../utils/generator";
-import { FieldSchema, FormModel, FormSchema } from "../utils/structures";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Button, DatePicker, Divider, Space, message } from "antd";
 import { z } from "zod";
-import InnerConfigForm, {
-  InnerConfigValue,
-} from "./components/InnerConfigForm";
 
-const { Title, Paragraph, Text } = Typography;
+import { Generator, useDynamicForm } from "../utils/generator";
+import { FormModel } from "../utils/structures";
+import type { FieldSchema, FieldPath } from "../utils/structures";
 
+// AntD RangePicker as a custom control
+const RangeControl: React.FC<{
+  value?: [any, any] | null;
+  onChange?: (val: [any, any] | null) => void;
+  disabled?: boolean;
+  status?: "error" | undefined;
+  size?: "small" | undefined;
+  id?: string;
+}> = ({ value, onChange, disabled, status, size, id }) => {
+  return (
+    <DatePicker.RangePicker
+      id={id}
+      style={{ width: "100%" }}
+      value={value as any}
+      onChange={(v) => onChange?.((v as any) ?? null)}
+      disabled={disabled}
+      status={status}
+      size={size}
+      placeholder={["开始日期", "结束日期"]}
+      allowClear
+    />
+  );
+};
+
+// Define top-level schema with an array-type field "members"
+const schema = {
+  fields: [
+    {
+      key: "members",
+      isArray: true,
+      // childrenFields are managed via updateChildren; start empty
+      childrenFields: [],
+    },
+  ],
+};
+const model = new FormModel(schema as any);
 export default function Page() {
-  // 单步骤：一个输入框(逗号分隔IP) + 一个数组字段“machines”，其子字段通过 updateChildren 全量生成
-  const schema = useMemo<FormSchema>(
-    () => ({
-      fields: [
+  // Maintain list of group keys, managed locally, and always update model via updateChildren
+  const [groupKeys, setGroupKeys] = useState<string[]>(["0"]);
+  const seqRef = useRef(1); // next id seed
+
+  // Build children schemas from group keys
+  const buildChildren = (keys: string[]): FieldSchema[] => {
+    return keys.map((k) => ({
+      key: k,
+      // container of one group's fields
+      childrenFields: [
         {
-          key: "ips",
-          label: "机器IP（逗号分隔）",
+          key: "name",
+          label: "英文名",
           control: "input",
-          helpTip: "例如：10.0.0.1, 10.0.0.2",
-          validate: z.string(),
-          defaultValue: "",
+          validate: z.string().min(1, "请填写英文名"),
+          itemProps: { placeholder: "如: John" },
         },
         {
-          key: "machines",
-          isArray: true,
-          // 初始无子项；每次根据 ips 全量 set(children)
-          childrenFields: [],
+          key: "period",
+          label: "开始-结束日期",
+          control: RangeControl,
+          // 基本形状校验（非空、两个日期），重叠校验由规则动态覆盖
+          validate: z
+            .any()
+            .refine((v) => Array.isArray(v) && v[0] && v[1], "请选择日期区间"),
         },
       ],
-    }),
-    []
-  );
+    }));
+  };
 
-  const model = useMemo(() => new FormModel(schema), [schema]);
+  const form = useDynamicForm(model);
 
+  // Keep latest groupKeys for rule closure
+  const groupKeysRef = useRef(groupKeys);
   useEffect(() => {
-    // 当 ips 变化时，重新生成 machines 的所有子字段（不保留旧值，直接全量设置）
-    model.registerRule(({ get, set }) => {
-      const raw = (get(["ips"]) as string) || "";
-      const ips = Array.from(
-        new Set(
-          raw
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        )
-      );
+    groupKeysRef.current = groupKeys;
+  }, [groupKeys]);
 
-      // 移除旧示例中的 OS 选项
+  // Ensure model's members children are in sync on mount and when keys change
+  useEffect(() => {
+    model.updateChildren(
+      ["members"],
+      buildChildren(groupKeys),
+      {
+        keepPreviousData: true,
+      },
+      false
+    );
+  }, [groupKeys, model]);
 
-      // 构建每个 IP 对应的一组配置（内嵌表单：备注/是否自动寻找路径/路径）
-      const groups = ips.map((ip) => {
-        const configField: FieldSchema = {
-          key: "config",
-          label: `配置（${ip}）`,
-          control: InnerConfigForm as unknown as React.ComponentType<{
-            value?: InnerConfigValue;
-            onChange?: (v: InnerConfigValue) => void;
-            disabled?: boolean;
-          }>,
-          // 外层对内嵌对象做一次整体校验：当 autoFindPath 为 false 时要求 path 必填
-          validate: z
-            .object({
-              remark: z.string().optional(),
-              autoFindPath: z.boolean(),
-              path: z.string().optional(),
-            })
-            .refine(
-              (d) => d.autoFindPath || !!(d.path && d.path.trim().length > 0),
-              "当未自动寻找路径时，请填写路径"
-            ),
-          defaultValue: { remark: "", autoFindPath: true, path: "" },
-        };
+  // Register rule on the array root to prevent overlapping periods for same name
+  useEffect(() => {
+    const effect = (ctx: {
+      get: (p: FieldPath) => any;
+      set: (p: FieldPath, prop: "validation" | any, v: any) => void;
+    }) => {
+      // Attach to the array root; during dependency collection this records the dep,
+      // at runtime this non-leaf get would throw so wrap it.
+      try {
+        ctx.get(["members"]);
+      } catch {}
 
-        const groupNode: FieldSchema = {
-          key: ip,
-          // 非叶子容器，无 state/schemaData，仅承载子字段
-          childrenFields: [configField],
-        };
+      const keys = groupKeysRef.current;
 
-        return groupNode;
-      });
+      // Collect current values per group
+      type Range = { start?: number; end?: number };
+      const nameByKey = new Map<string, string | undefined>();
+      const rangeByKey = new Map<string, Range>();
 
-      // 全量替换 children（不保留旧值）
-      // 注意：规则上下文的 set 仅允许 FieldState 的键，这里需要直接使用 model.set 来设置 children
-      model.updateChildren(["machines"], groups, { keepPreviousData: true });
+      for (const k of keys) {
+        let nm: string | undefined;
+        try {
+          nm = ctx.get(["members", k, "name"]);
+        } catch {}
+        nameByKey.set(k, nm);
 
-      // 内嵌表单自身处理显隐，这里无需在外层再注册显隐规则
-    });
+        // maintain period range cache for overlap checks
+        try {
+          const prd = ctx.get(["members", k, "period"]) as [any, any] | null;
+          const start = prd?.[0] ? (prd[0] as any).valueOf?.() : undefined;
+          const end = prd?.[1] ? (prd[1] as any).valueOf?.() : undefined;
+          rangeByKey.set(k, { start, end });
+        } catch {
+          rangeByKey.set(k, {});
+        }
+      }
 
-    // 初始化一次
+      // For each group, set a validation that checks overlap against others with same name
+      for (const k of keys) {
+        const myName = nameByKey.get(k);
+        const others = keys.filter(
+          (x) => x !== k && nameByKey.get(x) === myName
+        );
+
+        const validator = z
+          .any()
+          .refine((v) => Array.isArray(v) && v[0] && v[1], "请选择日期区间")
+          .superRefine((v, ctxZ) => {
+            if (!myName || !Array.isArray(v) || !v[0] || !v[1]) return;
+            const s = (v[0] as any).valueOf?.();
+            const e = (v[1] as any).valueOf?.();
+            if (typeof s !== "number" || typeof e !== "number") return;
+
+            for (const o of others) {
+              const r = rangeByKey.get(o);
+
+              if (!r?.start || !r?.end) continue;
+              const overlap = s <= r.end! && r.start! <= e; // inclusive overlap
+              if (overlap) {
+                ctxZ.addIssue({
+                  code: "custom",
+                  message: "同一英文名的时间段不能重叠",
+                });
+                return; // one issue is enough
+              }
+            }
+          });
+
+        try {
+          ctx.set(["members", k, "period"], "validation", validator as any);
+          model.validateField(["members", k, "period"]);
+        } catch {}
+      }
+    };
+
+    const callback = model.registerRule(effect as any);
+    // Run once to initialize
     model.runAllRules();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return callback;
   }, [model]);
+
+  const addGroup = () => {
+    const next = String(seqRef.current++);
+    setGroupKeys((prev) => [...prev, next]);
+  };
+
+  const handleSubmit = async () => {
+    try {
+      await form.validateAllFields();
+      const data = model.getJSONData(true);
+      // Show a quick success and log
+      message.open({
+        content: "校验通过，已在控制台打印数据",
+        type: "success",
+      });
+      console.log("提交数据:", data);
+    } catch (err) {
+      message.error("请检查表单错误");
+    }
+  };
+
+  console.log(model.getSnapshot());
 
   return (
     <div style={{ padding: 24 }}>
-      <Title level={3}>按 IP 动态生成嵌套表单</Title>
-      <Paragraph type="secondary">
-        输入逗号分隔的机器 IP。对于每个 IP，将在数组字段下生成一个嵌套表单：
-        备注、是否自动寻找路径，以及在选择“否”时显示的“路径”。 使用
-        <Text code>updateChildren</Text>全量替换子字段，并用规则控制字段显隐。
-      </Paragraph>
-
-      <Card style={{ marginTop: 12 }}>
-        <Generator model={model} displayFields={[["ips"], ["machines"]]} />
-      </Card>
+      <h2 style={{ marginBottom: 12 }}>数组型嵌套字段 Demo</h2>
+      <Generator
+        model={model}
+        displayFields={[["members"]] as any}
+        showInline
+        size="normal"
+        showDebug
+        labelSpan={8}
+        fieldSpan={16}
+      />
 
       <Divider />
-      <Text type="secondary">
-        提示：下方快照实时反映当前可见字段的 JSON 值。
-      </Text>
+      <Space>
+        <Button type="dashed" onClick={addGroup}>
+          + 添加一组
+        </Button>
+        <Button type="primary" onClick={handleSubmit}>
+          提交
+        </Button>
+      </Space>
     </div>
   );
 }

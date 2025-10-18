@@ -1,14 +1,3 @@
-
-
-
-/** 目前的表单完成情况：
- * 核心部分：
- * 1) 内部对象：存字段键、值、以及"是否显示"visible；用 immer 做 set/get。
- * 2) 值支持：标量值 + 单选（Radio）。(多选可用数组扩展，示例先不做)
- * 3) 多步骤：用二维数组 stepsLayout 来指示每个步骤的字段集合，数据共享一个 store。
- * 4) 动态生成：用 registerRule(deps, fn) 注册"像 useEffect 的函数"。当依赖字段变化时，触发 fn 控制其他字段的 visible。
- */
-
 // ----------------------------- 内部模型层 -----------------------------
 import { z, ZodType, ZodError } from "zod";
 import { ComponentType } from "react";
@@ -23,15 +12,17 @@ type ControlType =
   | "radio"
   | "select"
   | ComponentType<{
-    value?: FieldValue;
-    onChange?: (value: FieldValue) => void;
-    [key: string]: any;
-  }>; // 自定义渲染表单组件，用户也可以传入自己的组件渲染
+      value?: FieldValue;
+      onChange?: (value: FieldValue) => void;
+      [key: string]: any;
+    }>; // 自定义渲染表单组件，用户也可以传入自己的组件渲染
+
+type FieldType = "array" | "form";
 
 interface FieldSchema {
   key: FieldKey;
   label?: string;
-  // 是否是包含字段的数组
+  type?: FieldType; // 未来使用
   isArray?: boolean;
   validate?: ZodType;
   control?: ControlType;
@@ -66,8 +57,15 @@ interface CompiledFieldNode {
   path: FieldPath;
   state?: FieldState;
   isArray?: boolean;
+  /**
+   * 如果是数组型嵌套字段下的字段，需要有一个指向最靠近根字段的属性
+   */
+  rootArrayField?: CompiledFieldNode;
   schemaData?: Omit<FieldSchema, "key" | "validate">;
-  effect?: ReactiveEffect[];
+  /**
+   * 字段运行时的响应式字段，如果字段是isArray: true的子节点，则无效
+   */
+  effect?: Set<ReactiveEffect>;
   // 递归
   children: CompiledFieldNode[];
   // 校验对象的缓存，是全量的，不考虑分页（部分校验），只考虑是否可见
@@ -99,6 +97,11 @@ type ReactiveEffect = (ctx: {
     path: FieldPath | FieldPath[],
     prop: keyof FieldState,
     value: FieldValue
+  ) => void;
+  updateChildren: (
+    path: FieldPath,
+    value: FieldSchema[],
+    option?: { keepPreviousData?: boolean }
   ) => void;
 }) => void;
 
@@ -142,16 +145,27 @@ function compileOneNode(item: FieldSchema, path: FieldPath): CompiledFieldNode {
 
 const compileNodes = (
   schema: FieldSchema,
-  structure: CompiledFieldNode,
-  seenPath: FieldPath
+  cur: CompiledFieldNode,
+  seenPath: FieldPath,
+  rootArrayField?: CompiledFieldNode
 ) => {
+  let root = rootArrayField;
+  // 设置根数组节点的逻辑
+  if (schema.isArray && !root) {
+    root = cur;
+  }
+  if (root) {
+    cur.rootArrayField = root;
+  }
+
   for (let item of schema.childrenFields || []) {
     const newNode: CompiledFieldNode = compileOneNode(item, [
       ...seenPath,
       item.key,
     ]);
-    compileNodes(item, newNode, [...seenPath, item.key]);
-    structure.children.push(newNode);
+
+    compileNodes(item, newNode, [...seenPath, item.key], root);
+    cur.children.push(newNode);
   }
 };
 
@@ -161,7 +175,7 @@ class FormModel {
 
   private listeners = new Set<(stateSchema: CompiledFieldNode[]) => void>();
 
-  private rules: ReactiveRule[] = [];
+  private rules: Set<ReactiveRule> = new Set();
 
   public onChange?: (path: FieldPath, value: FieldValue) => void;
 
@@ -212,6 +226,23 @@ class FormModel {
     }
   }
 
+  private getNodesOnPath(path: FieldPath): CompiledFieldNode[] | undefined {
+    const nodes: CompiledFieldNode[] = [];
+    if (!path || path.length === 0) return undefined;
+
+    let current: CompiledFieldNode | undefined = this.compiledData;
+    for (let i = 0; i < path.length; i++) {
+      if (!current || !current.children) return undefined;
+      const nextNode: CompiledFieldNode | undefined = current.children.find(
+        (child: CompiledFieldNode) => child.key === path[i]
+      );
+      if (!nextNode) return undefined;
+      nodes.push(nextNode);
+      current = nextNode;
+    }
+    return nodes;
+  }
+
   subscribe(fn: () => void) {
     this.listeners.add(fn);
     return () => void this.listeners.delete(fn);
@@ -232,7 +263,9 @@ class FormModel {
         throw new Error("only array-type fields can retrieve child nodes.");
       }
     } else {
-      if (!node.state) throw new Error("node has no state: " + path.join("."));
+      if (!node.state) {
+        throw new Error("node has no state: " + path.join("."));
+      }
       // 对于非叶子节点，如果要获取value，返回undefined或者抛出错误
       if (prop === "value" && node.children && node.children.length > 0) {
         throw new Error(
@@ -246,7 +279,8 @@ class FormModel {
 
   /** 设置响应式属性的函数 */
   set = (path: FieldPath, prop: keyof FieldState, value: any) => {
-    const node = this.findNodeByPath(path);
+    const nodes = this.getNodesOnPath(path);
+    const node = nodes?.[nodes.length - 1];
 
     if (!node) throw new Error("the field is not found:" + path);
     // 如果是叶子节点（没有子节点），直接设置
@@ -259,7 +293,20 @@ class FormModel {
         this.rebuildDynamicSchema();
       } else if (prop === "value") {
         // 值变化后，触发依赖该字段的规则
-        this.triggerRulesFor(path);
+        if (nodes.some((x) => x.isArray)) {
+          if (node.isArray) {
+            throw new Error(
+              "please use updateChildren to set array field value"
+            );
+          } else {
+            const root = node.rootArrayField;
+            if (root) {
+              this.runEffects(root.effect || new Set<ReactiveEffect>());
+            }
+          }
+        } else {
+          this.triggerRulesFor(path);
+        }
       } else if (prop === "visible") {
         this.rebuildDynamicSchema();
       }
@@ -294,11 +341,15 @@ class FormModel {
     value: FieldSchema[],
     option?: {
       keepPreviousData?: boolean;
-    }
+    },
+    shouldTriggerRule: boolean = true
   ) {
     const node = this.findNodeByPath(path);
     if (!node) {
       throw new Error("the field is not found:" + path);
+    }
+    if (!node.isArray) {
+      throw new Error("updateChildren can only be used on array-type fields.");
     }
 
     // 生成新节点
@@ -312,7 +363,7 @@ class FormModel {
       path: ["dummy"],
       children: [],
     };
-    compileNodes(dummySource, dummyTarget, path);
+    compileNodes(dummySource, dummyTarget, path, node);
 
     // 遍历target树，一边遍历一边从缓存里找对应节点，并尝试复制value，结构不一致不会报错，但也不会复制
     const dfsFindCache = (
@@ -326,7 +377,6 @@ class FormModel {
         // 叶子结点
         if (cache && !(cache.child instanceof NodeChildrenCache)) {
           target.state.value = cache.value;
-          console.log(cache.child);
         }
       } else {
         for (let childTarget of target.children) {
@@ -376,17 +426,20 @@ class FormModel {
     }
     // 更新
     node.children = dummyTarget.children;
+    if (shouldTriggerRule) {
+      this.runEffects(node.effect || new Set<ReactiveEffect>());
+    }
     this.clearPathZodCache(path);
     this.notify();
   }
 
   /** 清除指定路径及其所有父路径的缓存 */
   private clearPathZodCache(path: FieldPath) {
-    // 清除从根到指定路径的所有节点缓存
-    for (let i = 0; i <= path.length; i++) {
-      const currentPath = path.slice(0, i);
-      const node = this.findNodeByPath(currentPath);
-      if (node && node.cache) {
+    const nodes = this.getNodesOnPath(path);
+    if (!nodes) return;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      if (node.cache && node.cache.zodObj) {
         node.cache.zodObj = undefined;
       }
     }
@@ -401,27 +454,39 @@ class FormModel {
     // 自动分析该副作用的依赖
     const deps: FieldPath[] = [];
     effect({
-      get: (path: FieldPath) => void deps.push(path), // 只收集依赖，其余什么也不做
-      set: () => { },
+      get: (path: FieldPath) => {
+        deps.push(path);
+      },
+      set: () => {},
+      updateChildren: () => {},
     });
     // 将依赖装入Rule
     const rule: ReactiveRule = { deps, fn: effect };
-    this.rules.push(rule);
+    this.rules.add(rule);
     // 建 dep 索引
     rule.deps.forEach((dep) => {
       const node = this.findNodeByPath(dep);
       if (!node) throw new Error("the field is not found");
-      if (!node.effect) node.effect = [];
-      node.effect.push(rule.fn);
+      if (!node.effect) node.effect = new Set();
+      node.effect.add(rule.fn);
     });
+
+    return () => {
+      rule.deps.forEach((dep) => {
+        const node = this.findNodeByPath(dep)!;
+        node.effect!.delete(rule.fn);
+      });
+    };
   }
 
   /** 主动触发一次全量规则（初始化时可用） */
   runAllRules() {
     this.runEffects(
-      this.rules.map((r) => {
-        return r.fn;
-      })
+      new Set(
+        [...this.rules].map((r) => {
+          return r.fn;
+        })
+      )
     );
   }
 
@@ -429,30 +494,23 @@ class FormModel {
    * 运行指定的副作用函数
    * @param effects 副作用函数数组
    */
-  private runEffects(effects: ReactiveEffect[]) {
+  private runEffects(effects: Set<ReactiveEffect>) {
     for (const effect of effects) {
       effect({
         get: (k) => this.get(k, "value"),
-        set: (key, prop, value) => {
-          if (Array.isArray(key) && Array.isArray(key[0])) {
-            (key as FieldPath[]).forEach((k) => {
-              this.set(k, prop, value);
-              if (prop === "validation" || prop === "visible") {
-                // 如果设置的是校验规则
-                this.clearPathZodCache(k);
-              }
+        set: (path, prop, value) => {
+          if (Array.isArray(path) && Array.isArray(path[0])) {
+            (path as FieldPath[]).forEach((p) => {
+              this.set(p, prop, value);
             });
-          } else if (Array.isArray(key)) {
-            this.set(key as FieldPath, prop, value);
-            if (prop === "validation" || prop === "visible") {
-              // 如果设置的是校验规则
-              this.clearPathZodCache(key as FieldPath);
-            }
+          } else if (Array.isArray(path)) {
+            this.set(path as FieldPath, prop, value);
           }
         },
+        updateChildren: (p, v, o) => this.updateChildren(p, v, o, false),
       });
+      this.notify();
     }
-    this.notify();
   }
 
   private triggerRulesFor(depFieldPath: FieldPath) {
