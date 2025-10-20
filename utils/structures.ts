@@ -91,19 +91,28 @@ interface FormSchema {
   fields: FieldSchema[];
 }
 
-type ReactiveEffect = (ctx: {
-  get: (path: FieldPath) => FieldValue;
-  set: (
-    path: FieldPath | FieldPath[],
-    prop: keyof FieldState,
-    value: FieldValue
-  ) => void;
-  updateChildren: (
-    path: FieldPath,
-    value: FieldSchema[],
-    option?: { keepPreviousData?: boolean }
-  ) => void;
-}) => void;
+type EffectInvokeReason =
+  | "children-updated"
+  | "value-changed"
+  | "dependencies-collecting"
+  | "initial-run";
+
+type ReactiveEffect = (
+  ctx: {
+    get: (path: FieldPath) => FieldValue;
+    set: (
+      path: FieldPath | FieldPath[],
+      prop: keyof FieldState,
+      value: FieldValue
+    ) => void;
+    updateChildren: (
+      path: FieldPath,
+      value: FieldSchema[],
+      option?: { keepPreviousData?: boolean }
+    ) => void;
+  },
+  cause: EffectInvokeReason
+) => void;
 
 interface ReactiveRule {
   deps: FieldPath[];
@@ -301,11 +310,14 @@ class FormModel {
           } else {
             const root = node.rootArrayField;
             if (root) {
-              this.runEffects(root.effect || new Set<ReactiveEffect>());
+              this.runEffects(
+                root.effect || new Set<ReactiveEffect>(),
+                "value-changed"
+              );
             }
           }
         } else {
-          this.triggerRulesFor(path);
+          this.triggerEffectsFor(path, "value-changed");
         }
       } else if (prop === "visible") {
         this.rebuildDynamicSchema();
@@ -424,12 +436,24 @@ class FormModel {
     if (node.cache?.children && option && option.keepPreviousData) {
       dfsFindCache(dummyTarget, node.cache?.children);
     }
+
+    // 更新前，清除校验对象缓存
+    const leafNodes = this.getAllLeafPaths(node);
+    leafNodes.forEach((p) => {
+      this.clearPathZodCache(p);
+    });
+
     // 更新
     node.children = dummyTarget.children;
+
     if (shouldTriggerRule) {
-      this.runEffects(node.effect || new Set<ReactiveEffect>());
+      this.runEffects(
+        node.effect || new Set<ReactiveEffect>(),
+        "children-updated"
+      );
     }
-    this.clearPathZodCache(path);
+    this.rebuildDynamicSchema();
+
     this.notify();
   }
 
@@ -437,6 +461,10 @@ class FormModel {
   private clearPathZodCache(path: FieldPath) {
     const nodes = this.getNodesOnPath(path);
     if (!nodes) return;
+    if (!this.compiledData.cache) {
+      this.compiledData.cache = {};
+    }
+    this.compiledData.cache.zodObj = undefined;
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
       if (node.cache && node.cache.zodObj) {
@@ -453,13 +481,16 @@ class FormModel {
   registerRule(effect: ReactiveEffect) {
     // 自动分析该副作用的依赖
     const deps: FieldPath[] = [];
-    effect({
-      get: (path: FieldPath) => {
-        deps.push(path);
+    effect(
+      {
+        get: (path: FieldPath) => {
+          deps.push(path);
+        },
+        set: () => {},
+        updateChildren: () => {},
       },
-      set: () => {},
-      updateChildren: () => {},
-    });
+      "dependencies-collecting"
+    );
     // 将依赖装入Rule
     const rule: ReactiveRule = { deps, fn: effect };
     this.rules.add(rule);
@@ -486,7 +517,8 @@ class FormModel {
         [...this.rules].map((r) => {
           return r.fn;
         })
-      )
+      ),
+      "initial-run"
     );
   }
 
@@ -494,55 +526,65 @@ class FormModel {
    * 运行指定的副作用函数
    * @param effects 副作用函数数组
    */
-  private runEffects(effects: Set<ReactiveEffect>) {
+  private runEffects(effects: Set<ReactiveEffect>, cause: EffectInvokeReason) {
     for (const effect of effects) {
-      effect({
-        get: (k) => this.get(k, "value"),
-        set: (path, prop, value) => {
-          if (Array.isArray(path) && Array.isArray(path[0])) {
-            (path as FieldPath[]).forEach((p) => {
-              this.set(p, prop, value);
-            });
-          } else if (Array.isArray(path)) {
-            this.set(path as FieldPath, prop, value);
-          }
+      effect(
+        {
+          get: (k) => this.get(k, "value"),
+          set: (path, prop, value) => {
+            if (Array.isArray(path) && Array.isArray(path[0])) {
+              (path as FieldPath[]).forEach((p) => {
+                this.set(p, prop, value);
+              });
+            } else if (Array.isArray(path)) {
+              this.set(path as FieldPath, prop, value);
+            }
+          },
+          updateChildren: (p, v, o) => this.updateChildren(p, v, o, false),
         },
-        updateChildren: (p, v, o) => this.updateChildren(p, v, o, false),
-      });
+        cause
+      );
       this.notify();
     }
   }
 
-  private triggerRulesFor(depFieldPath: FieldPath) {
+  private triggerEffectsFor(
+    depFieldPath: FieldPath,
+    cause: EffectInvokeReason
+  ) {
     const node = this.findNodeByPath(depFieldPath);
     if (!node) throw new Error("the field is not found");
     const list = node.effect;
     if (!list) return;
-    this.runEffects(list);
+    this.runEffects(list, cause);
   }
 
   /**
    * 获取所有叶子节点的路径数组
    * @returns 二维数组，每个内部数组代表一个叶子节点的完整路径
    */
-  getAllLeafPaths(node: CompiledFieldNode): FieldPath[] {
+  /**
+   * 获取指定节点（可选，默认根）的所有叶子节点路径
+   * @param node 可选的起始节点；若不传则从表单根开始
+   */
+  getAllLeafPaths(node?: CompiledFieldNode): FieldPath[] {
     const result: FieldPath[] = [];
 
-    const collectLeafPaths = (node: CompiledFieldNode) => {
+    const collectLeafPaths = (n: CompiledFieldNode) => {
       // 如果是叶子节点（没有子节点或子节点为空）
-      if (!node.children || node.children.length === 0) {
-        result.push([...node.path]); // 添加当前节点的路径到结果中
+      if (!n.children || n.children.length === 0) {
+        result.push([...n.path]); // 添加当前节点的路径到结果中
       }
       // 如果有子节点，递归处理
-      else if (node.children && node.children.length > 0) {
-        node.children.forEach((child) => {
+      else if (n.children && n.children.length > 0) {
+        n.children.forEach((child) => {
           collectLeafPaths(child);
         });
       }
     };
 
-    // 处理顶层节点
-    collectLeafPaths(node);
+    // 从传入节点或根节点开始
+    collectLeafPaths(node ?? this.compiledData);
     return result;
   }
 
@@ -855,4 +897,5 @@ export type {
   FieldState,
   ControlType,
   CompiledFieldNode as FieldWithStateSchema,
+  EffectInvokeReason,
 };

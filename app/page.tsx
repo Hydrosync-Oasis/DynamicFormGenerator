@@ -6,7 +6,11 @@ import { z } from "zod";
 
 import { Generator, useDynamicForm } from "../utils/generator";
 import { FormModel } from "../utils/structures";
-import type { FieldSchema, FieldPath } from "../utils/structures";
+import type {
+  FieldSchema,
+  FieldPath,
+  EffectInvokeReason,
+} from "../utils/structures";
 
 // AntD RangePicker as a custom control
 const RangeControl: React.FC<{
@@ -97,10 +101,13 @@ export default function Page() {
 
   // Register rule on the array root to prevent overlapping periods for same name
   useEffect(() => {
-    const effect = (ctx: {
-      get: (p: FieldPath) => any;
-      set: (p: FieldPath, prop: "validation" | any, v: any) => void;
-    }) => {
+    const effect = (
+      ctx: {
+        get: (p: FieldPath) => any;
+        set: (p: FieldPath, prop: "validation" | any, v: any) => void;
+      },
+      cause: EffectInvokeReason
+    ) => {
       // Attach to the array root; during dependency collection this records the dep,
       // at runtime this non-leaf get would throw so wrap it.
       try {
@@ -165,7 +172,9 @@ export default function Page() {
 
         try {
           ctx.set(["members", k, "period"], "validation", validator as any);
-          model.validateField(["members", k, "period"]);
+          if (cause === "value-changed") {
+            model.validateField(["members", k, "period"]);
+          }
         } catch {}
       }
     };
@@ -204,11 +213,14 @@ export default function Page() {
       <Generator
         model={model}
         displayFields={[["members"]] as any}
-        showInline
         size="normal"
-        showDebug
-        labelSpan={8}
-        fieldSpan={16}
+        displayOption={{
+          labelSpan: 8,
+          fieldSpan: 16,
+          showInline: true,
+          showDebug: true,
+        }}
+        inlineMaxPerRow={3}
       />
 
       <Divider />

@@ -91,22 +91,20 @@ const Generator = ({
   model,
   displayFields,
   size,
-  labelSpan = 4,
-  fieldSpan = 20,
-  showDebug = false,
-  showInline = false,
-  showLabel = true,
+  displayOption,
+  inlineMaxPerRow = 3,
 }: {
   model: FormModel;
   displayFields: FieldPath[];
   size?: "normal" | "small";
-  fieldSpan?: number;
-  labelSpan?: number;
-  showDebug?: boolean;
-  showInline?: boolean;
-  showLabel?: boolean;
+  displayOption?: { labelSpan?: number; fieldSpan?: number; showDebug?: boolean; showInline?: boolean };
+  inlineMaxPerRow?: number;
 }) => {
   const isSmall = size === "small";
+  const labelSpan = displayOption?.labelSpan ?? 4;
+  const fieldSpan = displayOption?.fieldSpan ?? 20;
+  const showInline = displayOption?.showInline ?? false;
+  const showDebug = displayOption?.showDebug ?? false;
   // 响应式更新
   const [, force] = useState({});
   useEffect(() => {
@@ -334,21 +332,27 @@ const Generator = ({
           ) : (
             <>
               {displayFields.length === 1 && (
-                <Space>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${inlineMaxPerRow}, minmax(0, 1fr))`,
+                    gap: isSmall ? 12 : 16,
+                    width: "100%",
+                  }}
+                >
                   {curNode?.children.map((node) => (
-                    <Card
-                      title={curNode.schemaData?.label}
-                      key={node.path.join(".")}
-                    >
-                      <Generator
-                        displayFields={[node.path]}
-                        model={model}
-                        fieldSpan={fieldSpan}
-                        labelSpan={labelSpan}
-                      />
-                    </Card>
+                    <div key={node.path.join(".")}> 
+                      <Card title={curNode.schemaData?.label}>
+                        <Generator
+                          displayFields={[node.path]}
+                          model={model}
+                          displayOption={{ fieldSpan, labelSpan }}
+                          size={size}
+                        />
+                      </Card>
+                    </div>
                   ))}
-                </Space>
+                </div>
               )}
             </>
           )}
