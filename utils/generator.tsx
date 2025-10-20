@@ -46,7 +46,7 @@ const useDynamicForm2 = (model: FormModel) => {
       return model.get(path, "value");
     },
     setFieldValue: (path: FieldPath, value: FieldValue) => {
-      model.set(path, "value", value);
+      model.setValue(path, value);
     },
     setFieldsValue: (values: any) => {
       // 递归设置多个字段的值
@@ -64,7 +64,7 @@ const useDynamicForm2 = (model: FormModel) => {
             setNestedValues(value, path);
           } else {
             try {
-              model.set(path, "value", value);
+              model.setValue(path, value);
             } catch {
               // 说明有多余字段
             }
@@ -97,7 +97,12 @@ const Generator = ({
   model: FormModel;
   displayFields: FieldPath[];
   size?: "normal" | "small";
-  displayOption?: { labelSpan?: number; fieldSpan?: number; showDebug?: boolean; showInline?: boolean };
+  displayOption?: {
+    labelSpan?: number;
+    fieldSpan?: number;
+    showDebug?: boolean;
+    showInline?: boolean;
+  };
   inlineMaxPerRow?: number;
 }) => {
   const isSmall = size === "small";
@@ -106,12 +111,15 @@ const Generator = ({
   const showInline = displayOption?.showInline ?? false;
   const showDebug = displayOption?.showDebug ?? false;
   // 响应式更新
-  const [, force] = useState({});
+  const [a, force] = useState({});
   useEffect(() => {
     return model.subscribe(() => {
       force({});
     });
   }, [model]);
+  // useEffect(() => {
+  //   console.log(1);
+  // }, [a]);
 
   // 递归渲染字段
   const renderField = (path: FieldPath): React.ReactNode => {
@@ -119,7 +127,7 @@ const Generator = ({
     if (!node) return null;
 
     // 如果有子节点，那么当前节点并无内容，仅渲染子节点
-    if (!node.schemaData) {
+    if (node.type !== "field") {
       // schemaData只有叶子结点有
       if (node.children.length > 0) {
         return (
@@ -156,13 +164,13 @@ const Generator = ({
     if (typeof control !== "string") {
       CustomComponent = control;
     }
-    if (!node.state) {
+    if (node.type !== "field") {
       throw new Error("non-leaf node");
     }
 
     // 处理字段值变化的回调
     const handleChange = (value: FieldValue) => {
-      model.updateValue(path, value, true);
+      model.setValue(path, value, { invokeOnChange: true });
       // 可选：实时验证
       model.validateField(path).catch(() => {
         // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
@@ -341,8 +349,8 @@ const Generator = ({
                   }}
                 >
                   {curNode?.children.map((node) => (
-                    <div key={node.path.join(".")}> 
-                      <Card title={curNode.schemaData?.label}>
+                    <div key={node.path.join(".")}>
+                      <Card title={node.schemaData?.label}>
                         <Generator
                           displayFields={[node.path]}
                           model={model}
