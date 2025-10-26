@@ -98,7 +98,8 @@ type EffectInvokeReason =
 
 type ReactiveEffect = (
   ctx: ReactiveEffectContext,
-  cause: EffectInvokeReason
+  cause: EffectInvokeReason,
+  info?: { changedPath?: FieldPath }
 ) => void;
 
 type ReactiveEffectContext = {
@@ -357,7 +358,8 @@ class FormModel {
         if (root && invokeEffect) {
           this.runEffects(
             root.effect || new Set<ReactiveEffect>(),
-            "value-changed"
+            "value-changed",
+            { changedPath: path }
           );
         }
       }
@@ -619,7 +621,11 @@ class FormModel {
    * 运行指定的副作用函数
    * @param effects 副作用函数数组
    */
-  private runEffects(effects: Set<ReactiveEffect>, cause: EffectInvokeReason) {
+  private runEffects(
+    effects: Set<ReactiveEffect>,
+    cause: EffectInvokeReason,
+    info?: { changedPath?: FieldPath }
+  ) {
     for (const effect of effects) {
       effect(
         {
@@ -633,7 +639,8 @@ class FormModel {
           setAlertTip: (path, content) => this.setAlertTip(path, content),
           setDisable: (path, isDisable) => this.setDisable(path, isDisable),
         },
-        cause
+        cause,
+        info
       );
       this.notify();
     }
@@ -647,7 +654,7 @@ class FormModel {
     if (!node) throw new Error("the field is not found");
     const list = node.effect;
     if (!list) return;
-    this.runEffects(list, cause);
+    this.runEffects(list, cause, { changedPath: depFieldPath });
   }
 
   /**

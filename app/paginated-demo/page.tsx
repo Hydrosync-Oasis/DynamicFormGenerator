@@ -256,7 +256,8 @@ export default function PaginatedDemoPage() {
   useEffect(() => {
     const effect: ReactiveEffect = (
       ctx: ReactiveEffectContext,
-      cause: EffectInvokeReason
+      cause: EffectInvokeReason,
+      info?: { changedPath?: FieldPath }
     ) => {
       let environment = "";
       try {
@@ -272,7 +273,10 @@ export default function PaginatedDemoPage() {
             .regex(/^[0-9\-+]{5,20}$/, "请填写正确的手机号或分机号")
         : z.string().optional();
       ctx.setValidation(["productionContact"], validator as any);
-      if (cause === "value-changed") {
+      if (
+        cause === "value-changed" &&
+        info?.changedPath?.join(".") === "environment"
+      ) {
         paginatedModel.validateField(["productionContact"]).catch(() => {});
       }
     };
@@ -284,7 +288,8 @@ export default function PaginatedDemoPage() {
   useEffect(() => {
     const effect: ReactiveEffect = (
       ctx: ReactiveEffectContext,
-      cause: EffectInvokeReason
+      cause: EffectInvokeReason,
+      info?: { changedPath?: FieldPath }
     ) => {
       let flag = "off";
       try {
@@ -297,7 +302,10 @@ export default function PaginatedDemoPage() {
         ? z.string().min(1, "开启高级配置后需补充说明")
         : z.string().optional();
       ctx.setValidation(["advancedNote"], validator as any);
-      if (cause === "value-changed") {
+      if (
+        cause === "value-changed" &&
+        info?.changedPath?.join(".") === "enableAdvanced"
+      ) {
         paginatedModel.validateField(["advancedNote"]).catch(() => {});
       }
     };
@@ -324,7 +332,8 @@ export default function PaginatedDemoPage() {
   useEffect(() => {
     const effect: ReactiveEffect = (
       ctx: ReactiveEffectContext,
-      cause: EffectInvokeReason
+      cause: EffectInvokeReason,
+      info?: { changedPath?: FieldPath }
     ) => {
       ctx.get(["moduleConfigs"]);
 
@@ -350,10 +359,15 @@ export default function PaginatedDemoPage() {
               .regex(/^[0-9]{1,5}$/, "请输入 0-65535 之间的端口")
           : z.string().optional();
         ctx.setValidation([...base, "exposurePort"], validator as any);
-        if (cause === "value-changed") {
+        const changed = info?.changedPath;
+        if (
+          cause === "value-changed" &&
+          changed &&
+          changed.length === [...base, "exposure"].length &&
+          changed.every((v, i) => v === [...base, "exposure"][i])
+        ) {
           paginatedModel
-            .validateField([...base, "exposurePort"])
-            .catch(() => {});
+            .validateField([...base, "exposurePort"]).catch(() => {});
         }
       });
     };
@@ -365,7 +379,8 @@ export default function PaginatedDemoPage() {
   useEffect(() => {
     const effect: ReactiveEffect = (
       ctx: ReactiveEffectContext,
-      cause: EffectInvokeReason
+      cause: EffectInvokeReason,
+      info?: { changedPath?: FieldPath }
     ) => {
       let mode = "auto";
       mode = ctx.get(["requiresApproval"]);
@@ -379,7 +394,10 @@ export default function PaginatedDemoPage() {
             .email("请输入正确的邮箱")
         : z.string().optional();
       ctx.setValidation(["approverEmail"], validator as any);
-      if (cause === "value-changed") {
+      if (
+        cause === "value-changed" &&
+        info?.changedPath?.join(".") === "requiresApproval"
+      ) {
         paginatedModel.validateField(["approverEmail"]).catch(() => {});
       }
     };
