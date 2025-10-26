@@ -41,6 +41,8 @@ const NumberInput: React.FC<{
 };
 
 export default function Page() {
+  // 用于记录当前 orgInfo 所使用的字段集（基于 role），避免通过读取子键来判断
+  const orgModeRef = useRef<"student" | "employee">("student");
   // 1) 定义“个人 + 学校/公司”的复杂动态表单结构
   const schoolFields: FieldSchema[] = [
     {
@@ -215,13 +217,14 @@ export default function Page() {
     // 3.1 身份切换：动态切换 orgInfo 的子结构（学校/公司）
     const unreg1 = model.registerRule((ctx) => {
       const role = ctx.get(["role"]);
-      console.log(99);
-
-      ctx.updateChildren(
-        ["orgInfo"],
-        role === "employee" ? companyFields : schoolFields,
-        { keepPreviousData: true, shouldTriggerRule: true }
-      );
+      if (role !== orgModeRef.current) {
+        ctx.updateChildren(
+          ["orgInfo"],
+          role === "employee" ? companyFields : schoolFields,
+          { keepPreviousData: true, shouldTriggerRule: true }
+        );
+        orgModeRef.current = role as "student" | "employee";
+      }
     });
 
     // 3.2 个人信息跨字段校验：年龄与出生日期、紧急联系电话不等于本人电话、身份证与生日匹配
@@ -231,68 +234,64 @@ export default function Page() {
       const idNo = ctx.get(["person", "idNumber"]);
 
       // 年龄与出生年份大致匹配（±1 年容差）
-      try {
-        ctx.setValidation(
-          ["person", "age"],
-          z.coerce
-            .number()
-            .int()
-            .min(0)
-            .max(120)
-            .refine((age) => {
-              const t = Date.parse(String(birth ?? ""));
-              if (Number.isNaN(t)) return true;
-              const by = new Date(t).getFullYear();
-              const nowY = new Date().getFullYear();
-              const expect = nowY - by;
-              return Math.abs((age ?? 0) - expect) <= 1;
-            }, "年龄与出生日期不匹配")
-        );
-      } catch {}
+      ctx.setValidation(
+        ["person", "age"],
+        z.coerce
+          .number()
+          .int()
+          .min(0)
+          .max(120)
+          .refine((age) => {
+            const t = Date.parse(String(birth ?? ""));
+            if (Number.isNaN(t)) return true;
+            const by = new Date(t).getFullYear();
+            const nowY = new Date().getFullYear();
+            const expect = nowY - by;
+            return Math.abs((age ?? 0) - expect) <= 1;
+          }, "年龄与出生日期不匹配")
+      );
 
       // 紧急电话不得等于本人电话
-      try {
-        ctx.setValidation(
-          ["person", "emergencyPhone"],
-          z
-            .string()
-            .regex(/^1\d{10}$/)
-            .refine((v) => v !== phone, "紧急联系电话不能与本人手机号相同")
-        );
-      } catch {}
+      ctx.setValidation(
+        ["person", "emergencyPhone"],
+        z
+          .string()
+          .regex(/^1\d{10}$/)
+          .refine((v) => v !== phone, "紧急联系电话不能与本人手机号相同")
+      );
 
       // 身份证与出生日期匹配（若为18位身份证，校验其中的生日段 yyyyMMdd）
-      try {
-        ctx.setValidation(
-          ["person", "idNumber"],
-          z
-            .string()
-            .regex(/^\d{17}[\dXx]$/)
-            .refine((v) => {
-              const b = String(birth ?? "");
-              if (!/^\d{4}-\d{2}-\d{2}$/.test(b)) return true;
-              const ymd = b.replace(/-/g, "");
-              const seg = v.slice(6, 14);
-              return seg === ymd;
-            }, "身份证中的出生日期与填写的不一致")
-        );
-      } catch {}
+      ctx.setValidation(
+        ["person", "idNumber"],
+        z
+          .string()
+          .regex(/^\d{17}[\dXx]$/)
+          .refine((v) => {
+            const b = String(birth ?? "");
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(b)) return true;
+            const ymd = b.replace(/-/g, "");
+            const seg = v.slice(6, 14);
+            return seg === ymd;
+          }, "身份证中的出生日期与填写的不一致")
+      );
 
-      // 未成年人提示，且禁用公司薪资字段
-      try {
-        const age = ctx.get(["person", "age"]);
-        ctx.get(["orgInfo"]); // 依赖数组根
-        if (typeof age === "number" && age < 18) {
-          ctx.setAlertTip(
-            ["person", "age"],
-            <Text>未成年人：部分公司字段可能被禁用</Text>
-          );
+      // 未成年人提示，且（在员工场景且确有该字段时）禁用公司薪资字段
+      const age = ctx.get(["person", "age"]);
+      const role = ctx.get(["role"]); // 作为依赖，保证切换时也能触发
+      if (typeof age === "number" && age < 18) {
+        ctx.setAlertTip(
+          ["person", "age"],
+          <Text>未成年人：部分公司字段可能被禁用</Text>
+        );
+        if (orgModeRef.current === "employee") {
           ctx.setDisable(["orgInfo", "salary"], true);
-        } else {
-          ctx.setAlertTip(["person", "age"], undefined);
+        }
+      } else {
+        ctx.setAlertTip(["person", "age"], undefined);
+        if (orgModeRef.current === "employee") {
           ctx.setDisable(["orgInfo", "salary"], false);
         }
-      } catch {}
+      }
     });
 
     // 3.3 学校/公司分场景校验（只能监听 orgInfo 根；读取子字段不作为依赖）
@@ -300,7 +299,7 @@ export default function Page() {
       const role = ctx.get(["role"]);
       ctx.get(["orgInfo"]);
 
-      if (role === "student") {
+      if (role === "student" && orgModeRef.current === "student") {
         const enrol = ctx.get(["orgInfo", "enrolDate"], false);
         const grad = ctx.get(["orgInfo", "graduationDate"], false);
         const grade = ctx.get(["orgInfo", "grade"], false);
@@ -350,7 +349,7 @@ export default function Page() {
               "学校邮箱建议以 .edu 结尾"
             )
         );
-      } else if (role === "employee") {
+      } else if (role === "employee" && orgModeRef.current === "employee") {
         const hire = ctx.get(["orgInfo", "hireDate"], false);
         const salary = ctx.get(["orgInfo", "salary"], false);
         const workEmail = ctx.get(["orgInfo", "workEmail"], false);
@@ -364,41 +363,35 @@ export default function Page() {
         const h = parse(hire);
         const b = parse(birth);
 
-        try {
-          ctx.setValidation(
-            ["orgInfo", "hireDate"],
-            z
-              .string()
-              .min(1, "必填")
-              .refine(() => !!h && !!b && h! > b!, "入职日期必须晚于出生日期")
-          );
-        } catch {}
+        ctx.setValidation(
+          ["orgInfo", "hireDate"],
+          z
+            .string()
+            .min(1, "必填")
+            .refine(() => !!h && !!b && h! > b!, "入职日期必须晚于出生日期")
+        );
 
-        try {
-          ctx.setValidation(
-            ["orgInfo", "probationMonths"],
-            z.coerce
-              .number()
-              .int()
-              .min(0)
-              .max(12)
-              .refine(
-                (m) =>
-                  typeof salary === "number" && salary < 3000 ? m <= 6 : true,
-                "低薪岗位试用期不得超过6个月"
-              )
-          );
-        } catch {}
+        ctx.setValidation(
+          ["orgInfo", "probationMonths"],
+          z.coerce
+            .number()
+            .int()
+            .min(0)
+            .max(12)
+            .refine(
+              (m) =>
+                typeof salary === "number" && salary < 3000 ? m <= 6 : true,
+              "低薪岗位试用期不得超过6个月"
+            )
+        );
 
-        try {
-          ctx.setValidation(
-            ["orgInfo", "workEmail"],
-            z
-              .string()
-              .email()
-              .refine((v) => v !== personalEmail, "工作邮箱不能与个人邮箱相同")
-          );
-        } catch {}
+        ctx.setValidation(
+          ["orgInfo", "workEmail"],
+          z
+            .string()
+            .email()
+            .refine((v) => v !== personalEmail, "工作邮箱不能与个人邮箱相同")
+        );
       }
     });
 

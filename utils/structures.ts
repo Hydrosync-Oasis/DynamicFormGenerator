@@ -120,7 +120,7 @@ type ReactiveEffectContext = {
   updateChildren: (
     path: FieldPath,
     value: FieldSchema[],
-    option?: { keepPreviousData?: boolean; shouldTriggerRule: boolean }
+    option?: { keepPreviousData?: boolean; shouldTriggerRule?: boolean }
   ) => void;
   setAlertTip: (path: FieldPath, content: React.ReactNode) => void;
   /** 设置字段禁用状态；若 path 指向非叶子，则批量设置其所有后代叶子 */

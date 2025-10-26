@@ -1,14 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  Button,
-  Card,
-  Pagination,
-  Space,
-  Typography,
-  message,
-} from "antd";
+import { Button, Card, Pagination, Space, Typography, message } from "antd";
 import { z } from "zod";
 
 import { Generator, useDynamicForm } from "@/utils/generator";
@@ -233,15 +226,16 @@ const paginatedSchema = {
   ],
 } satisfies { fields: FieldSchema[] };
 
-const paginatedModel = new FormModel(paginatedSchema as any);
+const paginatedModel = new FormModel(paginatedSchema);
 
 export default function PaginatedDemoPage() {
   const form = useDynamicForm(paginatedModel);
   const [pageIndex, setPageIndex] = useState(1);
   const [messageApi, contextHolder] = message.useMessage();
-  const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(
-    null
-  );
+  const [previewData, setPreviewData] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   const pageFieldPaths = useMemo<FieldPath[][]>(
     () => [
@@ -315,18 +309,12 @@ export default function PaginatedDemoPage() {
   useEffect(() => {
     const effect: ReactiveEffect = (ctx: ReactiveEffectContext) => {
       let rawModules = "";
-      try {
-        rawModules = ctx.get(["moduleNames"]) ?? "";
-      } catch {}
+      rawModules = ctx.get(["moduleNames"]) ?? "";
 
       const modules = parseModuleInput(rawModules);
-      ctx.updateChildren(
-        ["moduleConfigs"],
-        moduleChildrenSchema(modules),
-        {
-          keepPreviousData: true,
-        }
-      );
+      ctx.updateChildren(["moduleConfigs"], moduleChildrenSchema(modules), {
+        keepPreviousData: true,
+      });
     };
 
     const dispose = paginatedModel.registerRule(effect);
@@ -338,14 +326,10 @@ export default function PaginatedDemoPage() {
       ctx: ReactiveEffectContext,
       cause: EffectInvokeReason
     ) => {
-      try {
-        ctx.get(["moduleConfigs"]);
-      } catch {}
+      ctx.get(["moduleConfigs"]);
 
       let rawModules = "";
-      try {
-        rawModules = ctx.get(["moduleNames"]) ?? "";
-      } catch {}
+      rawModules = ctx.get(["moduleNames"]) ?? "";
       const modules = parseModuleInput(rawModules);
 
       modules.forEach(({ key }) => {
@@ -384,9 +368,7 @@ export default function PaginatedDemoPage() {
       cause: EffectInvokeReason
     ) => {
       let mode = "auto";
-      try {
-        mode = ctx.get(["requiresApproval"]);
-      } catch {}
+      mode = ctx.get(["requiresApproval"]);
 
       const visible = mode === "manual";
       ctx.setVisible(["approverEmail"], visible);
@@ -479,7 +461,8 @@ export default function PaginatedDemoPage() {
           </Title>
           <Paragraph style={{ marginBottom: 0 }}>
             本示例将数组字段、条件展示、跨字段校验与自动摘要等功能聚合在同一张表单中，
-            通过 Ant Design 的 <Text code>Pagination</Text> 组件在多个分页之间切换。
+            通过 Ant Design 的 <Text code>Pagination</Text>{" "}
+            组件在多个分页之间切换。
           </Paragraph>
         </div>
 
@@ -503,9 +486,7 @@ export default function PaginatedDemoPage() {
               />
               <Space>
                 <Button
-                  onClick={() =>
-                    setPageIndex((prev) => Math.max(1, prev - 1))
-                  }
+                  onClick={() => setPageIndex((prev) => Math.max(1, prev - 1))}
                   disabled={pageIndex === 1}
                 >
                   上一页
