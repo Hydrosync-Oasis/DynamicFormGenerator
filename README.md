@@ -50,4 +50,6 @@ pnpm dev
 
 在浏览器中打开 [http://localhost:3000](http://localhost:3000) 查看效果。
 
+[📘 使用说明文档](./docs/usage-guide.md)
+
 [utils 目录文档](./utils/README.md)
