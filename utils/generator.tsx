@@ -117,9 +117,6 @@ const Generator = ({
       force({});
     });
   }, [model]);
-  // useEffect(() => {
-  //   console.log(1);
-  // }, [a]);
 
   // 递归渲染字段
   const renderField = (path: FieldPath): React.ReactNode => {

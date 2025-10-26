@@ -76,7 +76,7 @@ interface FieldState {
   value?: FieldValue;
   visible: boolean; // 是否显示，响应式触发
   options: Array<{ label: string; value: string | number | boolean }>;
-  alertTip?: string;
+  alertTip?: React.ReactNode;
   errorMessage?: string;
   validation?: ZodType; // 响应式校验规则
   disabled: boolean; // 字段组件是否被禁用
@@ -102,7 +102,14 @@ type ReactiveEffect = (
 ) => void;
 
 type ReactiveEffectContext = {
-  get: (path: FieldPath) => FieldValue;
+  /**
+   * Read a field's value.
+   * @param path The field path to read.
+   * @param isDependency Whether this access should be tracked as a reactive dependency
+   *                     when used inside rule registration's dependency collection phase.
+   *                     Default true. Pass false to read without tracking.
+   */
+  get: (path: FieldPath, isDependency?: boolean) => FieldValue;
   setVisible: (path: FieldPath, visible: boolean) => void;
   setValue: (
     path: FieldPath,
@@ -115,6 +122,9 @@ type ReactiveEffectContext = {
     value: FieldSchema[],
     option?: { keepPreviousData?: boolean; shouldTriggerRule: boolean }
   ) => void;
+  setAlertTip: (path: FieldPath, content: React.ReactNode) => void;
+  /** 设置字段禁用状态；若 path 指向非叶子，则批量设置其所有后代叶子 */
+  setDisable: (path: FieldPath, isDisable: boolean) => void;
 };
 
 interface ReactiveRule {
@@ -273,10 +283,14 @@ class FormModel {
         throw new Error("node has no state: " + path.join("."));
       }
       // 对于非叶子节点，如果要获取value，返回undefined或者抛出错误
-      if (prop === "value" && node.children && node.children.length > 0) {
-        throw new Error(
-          "cannot get value from non-leaf node: " + path.join(".")
-        );
+      if (prop === "value") {
+        if (node.type === "array") {
+          return node.children;
+        } else if (node.type !== "field") {
+          throw new Error(
+            "cannot get value from non-leaf node: " + path.join(".")
+          );
+        }
       }
 
       return node.state[prop];
@@ -288,12 +302,23 @@ class FormModel {
     if (!node) {
       throw new Error("the field is not found:" + path);
     }
-    if (!node.state) {
+    if (node.type !== "field") {
       return;
     }
 
-    node.state.visible = visible;
-    this.clearPathZodCache(path);
+    const dfs = (node: CompiledFieldNode) => {
+      if (node.type === "field") {
+        node.state!.visible = visible;
+        this.clearPathZodCache(node.path);
+        return;
+      }
+
+      for (let i of node.children) {
+        dfs(i);
+      }
+    };
+
+    dfs(node);
     this.rebuildDynamicSchema();
     this.notify();
   }
@@ -379,7 +404,6 @@ class FormModel {
     }
   ) {
     const node = this.findNodeByPath(path);
-    console.log({ ...node?.cache?.children });
 
     if (!node) {
       throw new Error("the field is not found:" + path);
@@ -387,7 +411,6 @@ class FormModel {
     if (node.type !== "array") {
       throw new Error("updateChildren can only be used on array-type fields.");
     }
-    console.log("updateChildren", path);
 
     const shouldTriggerRule = option?.shouldTriggerRule ?? true;
     // 生成新节点
@@ -484,6 +507,40 @@ class FormModel {
     this.notify();
   }
 
+  setAlertTip(path: FieldPath, content: React.ReactNode) {
+    const node = this.findNodeByPath(path);
+    if (!node) {
+      throw new Error("the field is not found:" + path);
+    }
+    if (!node.state) {
+      throw new Error("the field is not leaf-node:" + path);
+    }
+
+    node.state.alertTip = content;
+    this.notify();
+  }
+
+  setDisable(path: FieldPath, isDisable: boolean) {
+    const node = this.findNodeByPath(path);
+    if (!node) {
+      throw new Error("the field is not found:" + path);
+    }
+    const dfs = (n: CompiledFieldNode) => {
+      if (n.type === "field") {
+        if (n.state) {
+          n.state.disabled = isDisable;
+        }
+        return;
+      }
+      if (n.children && n.children.length > 0) {
+        n.children.forEach((c) => dfs(c));
+      }
+    };
+
+    dfs(node);
+    this.notify();
+  }
+
   /** 清除指定路径及其所有父路径的缓存 */
   private clearPathZodCache(path: FieldPath) {
     const nodes = this.getNodesOnPath(path);
@@ -510,13 +567,20 @@ class FormModel {
     const deps: FieldPath[] = [];
     effect(
       {
-        get: (path: FieldPath) => {
-          deps.push(path);
+        get: (path: FieldPath, isDependency: boolean = true) => {
+          if (isDependency) deps.push(path);
+          console.log(path);
+
+          // During dependency collection we don't need the concrete value
+          // and we must satisfy the return type
+          return undefined as any;
         },
-        setVisible: () => {},
-        setValue: () => {},
-        setValidation: () => {},
-        updateChildren: () => {},
+        setVisible: () => void 0,
+        setValue: () => void 0,
+        setValidation: () => void 0,
+        updateChildren: () => void 0,
+        setAlertTip: () => void 0,
+        setDisable: () => void 0,
       },
       "dependencies-collecting"
     );
@@ -526,7 +590,7 @@ class FormModel {
     // 建 dep 索引
     rule.deps.forEach((dep) => {
       const node = this.findNodeByPath(dep);
-      if (!node) throw new Error("the field is not found");
+      if (!node) throw new Error("the field is not found: " + dep);
       if (!node.effect) node.effect = new Set();
       node.effect.add(rule.fn);
     });
@@ -559,13 +623,15 @@ class FormModel {
     for (const effect of effects) {
       effect(
         {
-          get: (k) => this.get(k, "value"),
+          get: (k, _isDependency?: boolean) => this.get(k, "value"),
           setVisible: (path, visible) => this.setVisible(path, visible),
           setValue: (path, value, option) => this.setValue(path, value, option),
           setValidation: (path, validator) =>
             this.setValidation(path, validator as any),
           updateChildren: (path, chilren, option) =>
             this.updateChildren(path, chilren, option),
+          setAlertTip: (path, content) => this.setAlertTip(path, content),
+          setDisable: (path, isDisable) => this.setDisable(path, isDisable),
         },
         cause
       );
@@ -713,7 +779,7 @@ class FormModel {
   }
 
   /**
-   * 动态生成局部 Schema 并一次性校验（支持跨字段校验增强）
+   * 动态生成局部 Schema 并一次性校验
    * @param paths 要校验的叶子字段路径集合（必须是叶子路径）
    */
   validateFieldsWithEnhancer(paths: FieldPath[]): Promise<any> {
@@ -724,7 +790,7 @@ class FormModel {
     for (const p of paths) {
       const node = this.findNodeByPath(p);
       if (!node) throw new Error("field not found: " + p.join("."));
-      if (node.children && node.children.length > 0) {
+      if (node.type !== "field") {
         throw new Error("path is not a leaf field: " + p.join("."));
       }
       targetNodeSet.add(node);
@@ -799,16 +865,20 @@ class FormModel {
         }
       }
       return Promise.reject(err);
+    } finally {
+      this.notify();
     }
   }
 
   /** 重新构建 schema（当字段可见性发生变化后应再次调用，全量构建，不分页） ，用于验证整个表单*/
-  private rebuildDynamicSchema(): ZodType | null {
+  private rebuildDynamicSchema(): ZodType | undefined {
     // 递归构建考虑可见性的 zod schema
-    const buildDynamicZodSchema = (node: CompiledFieldNode): ZodType | null => {
+    const buildDynamicZodSchema = (
+      node: CompiledFieldNode
+    ): ZodType | undefined => {
       // 如果节点不可见，返回null代表无校验规则
       if (node.state && !node.state.visible) {
-        return null;
+        return undefined;
       }
 
       if (node.cache && node.cache.zodObj) {
@@ -821,7 +891,7 @@ class FormModel {
           node.cache = {};
         }
         node.cache.zodObj = node.state.validation;
-        return node.state.validation || null;
+        return node.state.validation;
       }
 
       // 如果有子节点，构建对象 schema
@@ -836,9 +906,7 @@ class FormModel {
         }
 
         const zodObj =
-          Object.keys(shape).length > 0
-            ? z.object(shape)
-            : z.unknown().nonoptional();
+          Object.keys(shape).length > 0 ? z.object(shape) : undefined;
 
         if (!node.cache) {
           node.cache = {};
@@ -848,7 +916,7 @@ class FormModel {
         return zodObj;
       }
 
-      return null;
+      return undefined;
     };
 
     // 构建根级别的动态 schema
