@@ -265,12 +265,6 @@ const applicantModel = new FormModel(applicantSchema);
       ? z.string().min(1, "请填写论文/课题名")
       : z.string().optional();
     ctx.setValidation(["thesisTitle"], validator as any);
-    if (
-      cause === "value-changed" &&
-      info?.changedPath?.join(".") === "highestEducation"
-    ) {
-      applicantModel.validateField(["thesisTitle"]).catch(() => {});
-    }
   };
   applicantModel.registerRule(effect);
 }
@@ -471,8 +465,6 @@ export default function AppPage() {
   };
 
   useMemo(() => {
-    console.log(122);
-
     handleFillDemo();
   }, []);
 

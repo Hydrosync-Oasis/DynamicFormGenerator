@@ -303,9 +303,6 @@ class FormModel {
     if (!node) {
       throw new Error("the field is not found:" + path);
     }
-    if (node.type !== "field") {
-      return;
-    }
 
     const dfs = (node: CompiledFieldNode) => {
       if (node.type === "field") {

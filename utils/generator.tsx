@@ -200,7 +200,7 @@ const Generator = ({
                 )}
               </Col>
             </Row>
-            <Row align="middle">
+            <Row>
               <Col
                 span={labelSpan}
                 style={{
@@ -209,6 +209,7 @@ const Generator = ({
                   lineHeight: isSmall ? "24px" : "32px",
                 }}
               >
+                {/* 标签+冒号 */}
                 <label
                   htmlFor={path.join("/")}
                   style={{
@@ -243,9 +244,16 @@ const Generator = ({
                   </span>
                 </label>
               </Col>
-              <Col span={fieldSpan}>
+              {/* 字段组件内容 */}
+              <Col
+                span={fieldSpan}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
                 {/* 三选一逻辑：自定义组件 > 控件类型(input/radio) */}
-                <div>
+                <div style={{ flex: 1 }}>
                   {CustomComponent ? (
                     <CustomComponent
                       value={node.state.value}
@@ -269,6 +277,7 @@ const Generator = ({
                     />
                   ) : control === "radio" ? (
                     <Radio.Group
+                      className="!h-fit"
                       size={size === "small" ? "small" : undefined}
                       value={node.state.value}
                       options={node.state.options || options}
@@ -291,6 +300,11 @@ const Generator = ({
                     />
                   ) : null}
                 </div>
+              </Col>
+            </Row>
+            {/* 校验错误信息 */}
+            <Row>
+              <Col offset={labelSpan} span={fieldSpan}>
                 {node.state.errorMessage && (
                   <div
                     style={{
