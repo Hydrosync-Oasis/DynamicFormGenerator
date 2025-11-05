@@ -102,7 +102,7 @@ export interface LeafFieldStaticProp {
 }
 
 export interface NestedFieldDynamicProp {
-  validationRefine?: (z: ZodType) => void;
+  validationRefine?: (z: ZodType) => ZodType;
 }
 
 type MutableFieldNodeBaseType = {
@@ -137,6 +137,17 @@ export type NodeCache = {
       }
     | {
         type: "dirty";
+      };
+  validator:
+    | {
+        type: "dirty";
+      }
+    | {
+        type: "hidden";
+      }
+    | {
+        type: "hasValue";
+        validator: ZodType;
       };
 };
 

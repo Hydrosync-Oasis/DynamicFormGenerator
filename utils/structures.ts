@@ -3,6 +3,7 @@ import { z, ZodType, ZodError } from "zod";
 import { ComponentType } from "react";
 import { mutableNodeToImmutableNode, setMutableNode } from "./immutableHelper";
 import { PlainObjectCacheManager } from "./plainObjectCacheManager";
+import { ValidatorCacheManager } from "./validatorCacheManager";
 import {
   FieldValue,
   FieldSchema,
@@ -18,6 +19,8 @@ import {
   ReactiveEffectContext,
   ReactiveRule,
 } from "./type";
+import { isChildNode, isSamePath } from "./helper";
+import { NextDataPathnameNormalizer } from "next/dist/server/future/normalizers/request/next-data";
 
 type FieldProp = {
   children: FieldSchema[];
@@ -70,7 +73,7 @@ function compileOneNode(
         lastValue: null,
       },
       effect: new Set(),
-      cache: { plainObj: { type: "dirty" } },
+      cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
     };
   } else if (item.childrenFields && item.childrenFields?.length > 0) {
     return {
@@ -83,7 +86,7 @@ function compileOneNode(
         lastValue: null,
       },
       children: [],
-      cache: { plainObj: { type: "dirty" } },
+      cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
     };
   } else {
     return {
@@ -109,7 +112,7 @@ function compileOneNode(
         lastValue: null,
       },
       effect: new Set(),
-      cache: { plainObj: { type: "dirty" } },
+      cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
     };
   }
 }
@@ -159,6 +162,9 @@ class FormModel {
   /** 最终对象缓存管理器 */
   private plainCacheManager!: PlainObjectCacheManager;
 
+  /** 校验器缓存管理器 */
+  private validatorCacheManager!: ValidatorCacheManager;
+
   /** 最近一次收集到的最终对象 */
   private lastFinalPlainObj?: Record<string, any>;
 
@@ -180,7 +186,7 @@ class FormModel {
       children: [],
       dynamicProp: {},
       snapshot: { version: 0, lastValue: null },
-      cache: { plainObj: { type: "dirty" } },
+      cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
     };
 
     // 复制结点，从原始数据到内部带有State和Schema的结构化数据
@@ -201,8 +207,13 @@ class FormModel {
       this.mutableDataSource
     );
 
-    // 构建并缓存所有的 zod schema
-    this.rebuildDynamicSchema();
+    // 初始化校验器缓存管理器
+    this.validatorCacheManager = new ValidatorCacheManager(
+      this.mutableDataSource
+    );
+
+    this.plainCacheManager.rebuild();
+    this.validatorCacheManager.rebuild();
   }
 
   public findNodeByPath(path: FieldPath): MutableFieldNode | undefined {
@@ -260,7 +271,7 @@ class FormModel {
         node.dynamicProp!.visible = visible;
         // 可见性变更后，标记缓存
         this.plainCacheManager.updateNode(node);
-        // this.clearPathZodCache(node.path);
+        this.validatorCacheManager.updateNode(node);
         update(node);
         return;
       }
@@ -279,7 +290,9 @@ class FormModel {
       },
       this.currentVersion
     );
-    this.rebuildDynamicSchema();
+
+    this.validatorCacheManager.rebuild();
+    this.plainCacheManager.rebuild();
     this.notify();
   }
 
@@ -294,7 +307,7 @@ class FormModel {
     setMutableNode(
       this.mutableDataSource,
       path,
-      (node, nodes, update) => {
+      (node, nodes) => {
         const invokeOnChange = option?.invokeOnChange;
         const invokeEffect = option?.invokeEffect ?? true;
 
@@ -356,8 +369,20 @@ class FormModel {
     }
 
     node.dynamicProp.validation = validator;
-    // this.clearPathZodCache(path);
-    this.rebuildDynamicSchema();
+    this.validatorCacheManager.updateNode(node);
+  }
+
+  setRefiner(path: FieldPath, refiner: (z: ZodType) => ZodType) {
+    const node = this.findNodeByPath(path);
+    if (!node) {
+      throw new Error("the field is not found:" + path);
+    }
+    if (node.type === "field") {
+      throw new Error("the field is a leaf-node:" + path);
+    }
+
+    node.dynamicProp.validationRefine = refiner;
+    this.validatorCacheManager.updateNode(node);
   }
 
   getNodesOnPath(path: FieldPath, containsRoot?: boolean) {
@@ -420,22 +445,6 @@ class FormModel {
       this.currentVersion
     );
   }
-
-  /** 清除指定路径及其所有父路径的缓存 */
-  // private clearPathZodCache(path: FieldPath) {
-  //   const nodes = this.getNodesOnPath(path);
-  //   if (!nodes) return;
-  //   if (!this.mutableData.cache) {
-  //     this.mutableData.cache = {};
-  //   }
-  //   this.mutableData.cache.zodObj = undefined;
-  //   for (let i = 0; i < nodes.length; i++) {
-  //     const node = nodes[i];
-  //     if (node.cache && node.cache.zodObj) {
-  //       node.cache.zodObj = undefined;
-  //     }
-  //   }
-  // }
 
   getSnapshot(): ImmutableFormState {
     const res = mutableNodeToImmutableNode(
@@ -572,51 +581,9 @@ class FormModel {
    * 全量JSON
    * @returns 保持嵌套结构的数据对象
    */
-  getJSONData(shouldGenerateArray: boolean): Record<string, any> {
+  getJSONData(): Record<string, any> {
     // 使用最终对象缓存管理器收集并返回；若无值则返回空对象
     return this.plainCacheManager.getFinalPlainObject() ?? {};
-  }
-
-  /** 重新构建 schema（当字段可见性发生变化后应再次调用，全量构建） ，用于验证整个表单*/
-  private rebuildDynamicSchema(): ZodType | undefined {
-    // 递归构建考虑可见性的 zod schema
-    const buildDynamicZodSchema = (
-      node: MutableFieldNode
-    ): ZodType | undefined => {
-      // 如果节点不可见，返回null代表无校验规则
-      if (node.type === "field") {
-        if (!node.dynamicProp.visible) return undefined;
-        return node.dynamicProp.validation;
-      }
-
-      // 如果有子节点，构建对象 schema
-      // 不管是数组还是对象，一律按对象处理，因为即便是数组，每个元素的结构也有可能不相同
-      if (node.children && node.children.length > 0) {
-        const shape: Record<string, ZodType> = {};
-
-        for (const child of node.children) {
-          const childSchema = buildDynamicZodSchema(child);
-          if (childSchema) {
-            shape[child.key] = childSchema;
-          }
-        }
-
-        const zodObj =
-          Object.keys(shape).length > 0 ? z.object(shape) : undefined;
-
-        return zodObj;
-      }
-
-      return undefined;
-    };
-
-    // 构建根级别的动态 schema
-    let rootZod = buildDynamicZodSchema(this.mutableDataSource);
-    rootZod = z.object({
-      [this.mutableDataSource.key]: rootZod,
-    });
-
-    return rootZod;
   }
 
   /** 校验指定路径，校验时自动带上父字段上定义的enhancer，可跨字段校验 */
@@ -631,27 +598,121 @@ class FormModel {
    */
   validateField(path: FieldPath, enableEnhancer?: boolean): Promise<any> {
     // 在校验前先收集最终对象
-    this.lastFinalPlainObj = this.plainCacheManager.getFinalPlainObject(false);
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node, nodes, update) => {
-        if (!enableEnhancer) {
+    this.plainCacheManager.rebuild();
+    this.validatorCacheManager.rebuild();
+    let finalError = undefined;
+    if (!enableEnhancer) {
+      setMutableNode(
+        this.mutableDataSource,
+        path,
+        (node, _nodes, update) => {
           if (node.type === "field") {
-            const validateRes = node.dynamicProp.validation?.safeParse(
+            const res = node.dynamicProp.validation?.safeParse(
               node.dynamicProp.value
             );
-            node.dynamicProp.errorMessage = validateRes?.success
-              ? undefined
-              : validateRes?.error.message;
+            if (res?.success) {
+              node.dynamicProp.errorMessage = undefined;
+            } else {
+              node.dynamicProp.errorMessage = res?.error.message;
+              finalError = res?.error;
+            }
+          } else {
+            const validation = node.cache.validator;
+            const plainObj = node.cache.plainObj;
+            if (
+              validation.type === "hasValue" &&
+              plainObj.type === "hasValue"
+            ) {
+              const value = plainObj.validateData;
+              const validator = validation.validator;
+              const res = validator.safeParse(value);
+
+              const errorInfo = res.error?.issues;
+              const dfs = (node: MutableFieldNode) => {
+                if (node.type === "field") {
+                  const info = errorInfo?.find((e) => {
+                    return isSamePath(
+                      path.concat(e.path as string[]),
+                      node.path
+                    );
+                  });
+                  if (!info) {
+                    node.dynamicProp.errorMessage = undefined;
+                  } else {
+                    node.dynamicProp.errorMessage = info.message;
+                  }
+                  update(node);
+                  return;
+                }
+
+                for (let i of node.children) {
+                  dfs(i);
+                  update(i);
+                }
+              };
+              dfs(node);
+              if (!res.success) {
+                finalError = res.error;
+              }
+            } else if (
+              validation.type === "dirty" ||
+              plainObj.type === "dirty"
+            ) {
+              throw new Error("dirty value");
+            }
           }
-        } else {
-          // 采用根节点上的zod对象进行校验，仅设置path或path下子节点出现的错误即可
+        },
+        this.currentVersion
+      );
+    } else {
+      // 从根部校验
+      const value = this.mutableDataSource.cache.plainObj;
+      const validation = this.mutableDataSource.cache.validator;
+      if (value.type === "hasValue" && validation.type === "hasValue") {
+        const res = validation.validator.safeParse(value.validateData);
+        console.log(res);
+
+        const info = res.success
+          ? undefined
+          : res.error.issues.filter((e) =>
+              isChildNode(e.path as string[], path)
+            );
+
+        setMutableNode(
+          this.mutableDataSource,
+          path,
+          (node, _nodes, update) => {
+            const dfs = (node: MutableFieldNode) => {
+              if (node.type === "field") {
+                if (isChildNode(node.path, path)) {
+                  const msg = info?.find((x) =>
+                    isSamePath(x.path as string[], node.path)
+                  )?.message;
+                  node.dynamicProp.errorMessage = msg;
+                  update(node);
+                }
+                return;
+              }
+
+              for (let i of node.children) {
+                dfs(i);
+                update(i);
+              }
+            };
+            dfs(node);
+          },
+          this.currentVersion
+        );
+        if (!res.success) {
+          finalError = res.error;
         }
-      },
-      this.currentVersion
-    );
-    throw new Error("Method not implemented.");
+      } else if (value.type === "dirty" || validation.type === "dirty") {
+        throw new Error("dirty value");
+      }
+    }
+
+    if (!finalError) return Promise.resolve();
+    else return Promise.reject(finalError);
   }
 
   validateAllFields(enhancer?: (schema: ZodType) => ZodType): Promise<any> {
