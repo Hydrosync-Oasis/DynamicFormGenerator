@@ -110,7 +110,7 @@ const paginatedSchema = {
       label: "项目名称",
       control: "input",
       validate: z.string().min(1, "请填写项目名称"),
-      itemProps: { placeholder: "例如：动态表单生成平台" },
+      controlProps: { placeholder: "例如：动态表单生成平台" },
     },
     {
       key: "ownerEmail",
@@ -120,7 +120,7 @@ const paginatedSchema = {
         .string()
         .min(1, "请填写负责人邮箱")
         .email("请输入有效的邮箱地址"),
-      itemProps: { placeholder: "如：owner@example.com" },
+      controlProps: { placeholder: "如：owner@example.com" },
     },
     {
       key: "environment",
@@ -138,7 +138,7 @@ const paginatedSchema = {
       label: "生产值班人手机",
       control: "input",
       validate: z.string().optional(),
-      itemProps: { placeholder: "仅生产环境需填写" },
+      controlProps: { placeholder: "仅生产环境需填写" },
       initialVisible: false,
     },
     {
@@ -156,7 +156,7 @@ const paginatedSchema = {
       label: "高级配置说明",
       control: "input",
       validate: z.string().optional(),
-      itemProps: { placeholder: "开启高级配置后填写" },
+      controlProps: { placeholder: "开启高级配置后填写" },
       initialVisible: false,
     },
     {
@@ -177,7 +177,7 @@ const paginatedSchema = {
           使用逗号或换行分隔模块名称，例如：api、web、worker
         </Text>
       ),
-      itemProps: {
+      controlProps: {
         placeholder: "例如：api, web, worker",
       },
     },
@@ -213,7 +213,7 @@ const paginatedSchema = {
       label: "审批人邮箱",
       control: "input",
       validate: z.string().optional(),
-      itemProps: { placeholder: "选择人工审批时必填" },
+      controlProps: { placeholder: "选择人工审批时必填" },
       initialVisible: false,
     },
     {
@@ -221,7 +221,7 @@ const paginatedSchema = {
       label: "配置摘要",
       control: "input",
       validate: z.string().optional(),
-      itemProps: { disabled: true },
+      controlProps: { disabled: true },
     },
   ],
 } satisfies { fields: FieldSchema[] };
@@ -367,7 +367,8 @@ export default function PaginatedDemoPage() {
           changed.every((v, i) => v === [...base, "exposure"][i])
         ) {
           paginatedModel
-            .validateField([...base, "exposurePort"]).catch(() => {});
+            .validateField([...base, "exposurePort"])
+            .catch(() => {});
         }
       });
     };

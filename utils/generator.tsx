@@ -12,10 +12,17 @@ import {
   Tooltip,
   Flex,
 } from "antd";
-import React, { useState, useEffect, ComponentType } from "react";
+import React, {
+  useState,
+  useEffect,
+  ComponentType,
+  useSyncExternalStore,
+  useMemo,
+} from "react";
 import { FieldPath, FieldSchema, FieldValue, FormModel } from "./structures";
 import { ZodType } from "zod";
 import { InfoCircleOutlined } from "@ant-design/icons";
+import { ImmutableFormState } from "./type";
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 
@@ -27,64 +34,66 @@ interface DynamicFormHook {
   setFieldsValue: (value: any) => void;
   validateField: (path: FieldPath) => Promise<any>;
   validateFields: (paths: FieldPath[]) => Promise<any>;
-  validateAllFields: (enhancer?: (schema: ZodType) => ZodType) => Promise<any>;
+  validateAllFields: () => Promise<any>;
 }
 
-const useDynamicForm2 = (model: FormModel) => {
-  const hook: DynamicFormHook = {
-    validateAllFields: (enhancer?: (schema: ZodType) => ZodType) => {
-      return model.validateAllFields(enhancer);
-    },
-    validateField: (path: FieldPath) => {
-      return model.validateField(path);
-    },
-    submit: async () => {
-      await model.validateAllFields();
-      return model.getJSONData(true);
-    },
-    getFieldValue: (path: FieldPath) => {
-      return model.get(path, "value");
-    },
-    setFieldValue: (path: FieldPath, value: FieldValue) => {
-      model.setValue(path, value);
-    },
-    setFieldsValue: (values: any) => {
-      // 递归设置多个字段的值
-      const setNestedValues = (
-        obj: Record<string, any>,
-        currentPath: FieldPath = []
-      ) => {
-        Object.entries(obj).forEach(([key, value]) => {
-          const path = [...currentPath, key];
-          if (
-            typeof value === "object" &&
-            value !== null &&
-            !Array.isArray(value)
-          ) {
-            setNestedValues(value, path);
-          } else {
-            try {
-              model.setValue(path, value);
-            } catch {
-              // 说明有多余字段
+const useDynamicForm = (model: FormModel) => {
+  return useMemo(() => {
+    const hook: DynamicFormHook = {
+      validateAllFields: () => {
+        return model.validateAllFields();
+      },
+      validateField: (path: FieldPath) => {
+        return model.validateField(path);
+      },
+      submit: async () => {
+        await model.validateAllFields();
+        return model.getJSONData();
+      },
+      getFieldValue: (path: FieldPath) => {
+        return model.get(path, "value");
+      },
+      setFieldValue: (path: FieldPath, value: FieldValue) => {
+        model.setValue(path, value);
+      },
+      setFieldsValue: (values: any) => {
+        // 递归设置多个字段的值
+        const setNestedValues = (
+          obj: Record<string, any>,
+          currentPath: FieldPath = []
+        ) => {
+          Object.entries(obj).forEach(([key, value]) => {
+            const path = [...currentPath, key];
+            if (
+              typeof value === "object" &&
+              value !== null &&
+              !Array.isArray(value)
+            ) {
+              setNestedValues(value, path);
+            } else {
+              try {
+                model.setValue(path, value);
+              } catch {
+                // 说明有多余字段
+              }
             }
-          }
-        });
-      };
-      setNestedValues(values);
-    },
-    /**
-     * 校验指定字段，无论是否显示都校验，使用多步骤动态表单优先使用这个函数
-     * @param paths 要校验的字段路径数组
-     */
-    validateFields: (paths: FieldPath[]) => {
-      return model.validateFieldsWithEnhancer(
-        paths.filter((path) => model.get(path, "visible"))
-      );
-    },
-  };
+          });
+        };
+        setNestedValues(values);
+      },
+      /**
+       * 校验指定字段，无论是否显示都校验，使用多步骤动态表单优先使用这个函数
+       * @param paths 要校验的字段路径数组
+       */
+      validateFields: (paths: FieldPath[]) => {
+        return model.validateFieldsWithEnhancer(
+          paths.filter((path) => model.get(path, "visible"))
+        );
+      },
+    };
 
-  return hook;
+    return hook;
+  }, []);
 };
 
 const Generator = ({
@@ -110,43 +119,69 @@ const Generator = ({
   const fieldSpan = displayOption?.fieldSpan ?? 20;
   const showInline = displayOption?.showInline ?? false;
   const showDebug = displayOption?.showDebug ?? false;
-  // 响应式更新
-  const [a, force] = useState({});
-  useEffect(() => {
-    return model.subscribe(() => {
-      force({});
-    });
-  }, [model]);
+
+  // 获取不可变快照，利用useSES更新
+  const state = useSyncExternalStore(
+    model.subscribe.bind(model),
+    model.getSnapshot.bind(model),
+    model.getSnapshot.bind(model)
+  );
+  console.log(state);
+
+  // 根据路径从 state 中查找节点
+  const findNodeByPath = (
+    node: ImmutableFormState,
+    path: FieldPath
+  ): ImmutableFormState | null => {
+    if (path.length === 0) {
+      return node;
+    }
+
+    if (node.type === "field") {
+      return null;
+    }
+
+    const [first, ...rest] = path;
+    const child = node.children.find((c) => c.key === first);
+
+    if (!child) {
+      return null;
+    }
+
+    if (rest.length === 0) {
+      return child;
+    }
+
+    return findNodeByPath(child, rest);
+  };
 
   // 递归渲染字段
-  const renderField = (path: FieldPath): React.ReactNode => {
-    const node = model.findNodeByPath(path);
-    if (!node) return null;
+  const renderField = (
+    state: ImmutableFormState,
+    seenPath: FieldPath
+  ): React.ReactNode => {
+    const path = [...seenPath, state.key.toString()];
 
     // 如果有子节点，那么当前节点并无内容，仅渲染子节点
-    if (node.type !== "field") {
-      // schemaData只有叶子结点有
-      if (node.children.length > 0) {
+    if (state.type !== "field") {
+      if (state.children.length > 0) {
         return (
           <React.Fragment key={path.join(".")}>
-            {node.children.map((child) => renderField([...path, child.key]))}
+            {state.children.map((child) => renderField(child, path))}
           </React.Fragment>
         );
-      } else {
-        return <React.Fragment key={path.join(".")}></React.Fragment>;
       }
     }
 
     // 叶子节点才渲染UI
-    if (!node.state) return null;
+    if (state.type !== "field") return null;
 
-    const visible = node.state.visible;
+    const visible = state.prop.visible;
     if (!visible) return null;
 
-    const { label, control, options, itemProps } = node.schemaData!;
+    const { label, control, options, controlProps: itemProps } = state.prop!;
 
-    const zodSchema = node.state?.validation;
-    const isRequired = zodSchema ? !zodSchema.isOptional() : false;
+    const isRequired = state.prop.required;
 
     let CustomComponent:
       | ComponentType<
@@ -161,7 +196,7 @@ const Generator = ({
     if (typeof control !== "string") {
       CustomComponent = control;
     }
-    if (node.type !== "field") {
+    if (state.type !== "field") {
       throw new Error("non-leaf node");
     }
 
@@ -182,7 +217,7 @@ const Generator = ({
             <Row>
               <Col offset={labelSpan} span={fieldSpan}>
                 {/* Alert提示框 */}
-                {node.state.alertTip && (
+                {state.prop.alertTip && (
                   <ConfigProvider
                     theme={{
                       token: {
@@ -195,7 +230,7 @@ const Generator = ({
                       },
                     }}
                   >
-                    <Alert message={node.state.alertTip} type="warning" />
+                    <Alert message={state.prop.alertTip} type="warning" />
                   </ConfigProvider>
                 )}
               </Col>
@@ -221,9 +256,9 @@ const Generator = ({
                 >
                   <span>:</span>
                   <>
-                    {node.schemaData?.helpTip ? (
+                    {state.prop.toolTip ? (
                       <>
-                        <Tooltip title={node.schemaData.helpTip}>
+                        <Tooltip title={state.prop.toolTip}>
                           <InfoCircleOutlined
                             twoToneColor="#8C8C8C"
                             style={{ opacity: 0.48 }}
@@ -256,11 +291,11 @@ const Generator = ({
                 <div style={{ flex: 1 }}>
                   {CustomComponent ? (
                     <CustomComponent
-                      value={node.state.value}
+                      value={state.prop.value}
                       onChange={handleChange}
-                      options={node.state.options || options}
-                      status={node.state.errorMessage ? "error" : undefined}
-                      disabled={node.state.disabled}
+                      options={state.prop.options || options}
+                      status={state.prop.errorMessage ? "error" : undefined}
+                      disabled={state.prop.disabled}
                       size={size === "small" ? "small" : undefined}
                       {...itemProps}
                       id={path.join("/")}
@@ -269,32 +304,32 @@ const Generator = ({
                     <Input
                       {...itemProps}
                       size={size === "small" ? "small" : undefined}
-                      value={node.state.value}
+                      value={state.prop.value}
                       onChange={(e) => handleChange(e.target.value)}
-                      status={node.state.errorMessage ? "error" : undefined}
-                      disabled={node.state.disabled}
+                      status={state.prop.errorMessage ? "error" : undefined}
+                      disabled={state.prop.disabled}
                       id={path.join("/")}
                     />
                   ) : control === "radio" ? (
                     <Radio.Group
                       className="!h-fit"
                       size={size === "small" ? "small" : undefined}
-                      value={node.state.value}
-                      options={node.state.options || options}
+                      value={state.prop.value}
+                      options={state.prop.options || options}
                       onChange={(e) => handleChange(e.target.value)}
-                      disabled={node.state.disabled}
+                      disabled={state.prop.disabled}
                       id={path.join("/")}
                     />
                   ) : control === "select" ? (
                     <Select
                       style={{ width: "100%" }}
                       size={size === "small" ? "small" : undefined}
-                      value={node.state.value}
-                      options={node.state.options || options}
+                      value={state.prop.value}
+                      options={state.prop.options || options}
                       onChange={(value) => handleChange(value)}
                       placeholder="请选择"
-                      status={node.state.errorMessage ? "error" : undefined}
-                      disabled={node.state.disabled}
+                      status={state.prop.errorMessage ? "error" : undefined}
+                      disabled={state.prop.disabled}
                       id={path.join("/")}
                       {...itemProps}
                     />
@@ -305,14 +340,14 @@ const Generator = ({
             {/* 校验错误信息 */}
             <Row>
               <Col offset={labelSpan} span={fieldSpan}>
-                {node.state.errorMessage && (
+                {state.prop.errorMessage && (
                   <div
                     style={{
                       color: "#ff4d4f",
                       fontSize: isSmall ? "12px" : "13px",
                     }}
                   >
-                    {node.state.errorMessage}
+                    {state.prop.errorMessage}
                   </div>
                 )}
               </Col>
@@ -323,7 +358,6 @@ const Generator = ({
     );
   };
 
-  const curNode = model.findNodeByPath(displayFields[0]);
   return (
     <>
       <ConfigProvider
@@ -338,43 +372,18 @@ const Generator = ({
         }}
       >
         <div>
-          {!showInline ? (
-            <Flex
-              gap={isSmall ? 12 : 24}
-              vertical={true}
-              style={{ width: "100%" }}
-            >
-              {displayFields.map((path) =>
-                renderField(Array.isArray(path) ? path : [path])
-              )}
+          {
+            <Flex gap={isSmall ? 12 : 24} vertical style={{ width: "100%" }}>
+              {displayFields.map((path) => {
+                const node = findNodeByPath(state, path);
+                if (!node) {
+                  console.warn(`Node not found for path: ${path.join("/")}`);
+                  return null;
+                }
+                return renderField(node, []);
+              })}
             </Flex>
-          ) : (
-            <>
-              {displayFields.length === 1 && (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: `repeat(${inlineMaxPerRow}, minmax(0, 1fr))`,
-                    gap: isSmall ? 12 : 16,
-                    width: "100%",
-                  }}
-                >
-                  {curNode?.children.map((node) => (
-                    <div key={node.path.join(".")}>
-                      <Card title={node.schemaData?.label}>
-                        <Generator
-                          displayFields={[node.path]}
-                          model={model}
-                          displayOption={{ fieldSpan, labelSpan }}
-                          size={size}
-                        />
-                      </Card>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+          }
         </div>
       </ConfigProvider>
       {showDebug && (
@@ -385,7 +394,7 @@ const Generator = ({
             message="调试：内部对象快照"
             description={
               <pre style={{ whiteSpace: "pre-wrap" }}>
-                {JSON.stringify(model.getJSONData(true), null, 2)}
+                {JSON.stringify(model.getJSONData(), null, 2)}
               </pre>
             }
           />
@@ -395,4 +404,4 @@ const Generator = ({
   );
 };
 
-export { useDynamicForm2 as useDynamicForm, Generator };
+export { useDynamicForm, Generator };

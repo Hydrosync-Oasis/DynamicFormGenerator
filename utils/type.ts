@@ -72,7 +72,7 @@ export interface FieldSchema {
   // 初始可见性
   initialVisible?: boolean;
   // 单独给字段组件设置的prop
-  itemProps?: Record<string, unknown>;
+  controlProps?: Record<string, unknown>;
   // 默认值
   defaultValue?: FieldValue;
   // 帮助说明
@@ -97,7 +97,7 @@ export interface LeafDynamicProp {
 
 export interface LeafFieldStaticProp {
   label: string;
-  helpTip: React.ReactNode;
+  toolTip: React.ReactNode;
   control: ControlType;
 }
 
@@ -180,6 +180,10 @@ export type ImmutableFormFieldProp = {
   visible: boolean;
   options?: Array<{ label: string; value: string | number | boolean }>;
   alertTip?: React.ReactNode;
+  toolTip?: React.ReactNode;
+  control: ControlType;
+  controlProps?: Record<string, any>;
+  required: boolean;
 };
 
 // 导出的不可变快照类型

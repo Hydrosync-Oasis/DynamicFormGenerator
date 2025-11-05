@@ -1,15 +1,12 @@
-import {
-  MutableFieldNode,
-  ImmutableFormState,
-  FieldPath,
-  getNodesOnPath,
-} from "./structures";
+import { MutableFieldNode, FieldPath, getNodesOnPath } from "./structures";
+import { ImmutableFormState } from "./type";
 
 export function mutableNodeToImmutableNode(
   sourceNode: MutableFieldNode,
   currentVersion: number
 ): ImmutableFormState {
   const snapshotInfo = sourceNode.snapshot;
+  console.log(11);
 
   if (sourceNode.type === "field") {
     // 准备好返回的叶子结点
@@ -17,13 +14,17 @@ export function mutableNodeToImmutableNode(
       key: sourceNode.key,
       type: "field",
       prop: {
-        label: sourceNode.schemaData?.label!,
-        visible: sourceNode.dynamicProp?.visible || true,
-        value: sourceNode.dynamicProp?.value || null,
-        disabled: sourceNode.dynamicProp?.disabled || false,
-        errorMessage: sourceNode.dynamicProp?.errorMessage,
-        options: sourceNode.dynamicProp?.options,
-        alertTip: sourceNode.dynamicProp?.alertTip,
+        label: sourceNode.staticProp.label!,
+        visible: sourceNode.dynamicProp.visible || true,
+        value: sourceNode.dynamicProp.value || null,
+        disabled: sourceNode.dynamicProp.disabled || false,
+        errorMessage: sourceNode.dynamicProp.errorMessage,
+        options: sourceNode.dynamicProp.options,
+        alertTip: sourceNode.dynamicProp.alertTip,
+        toolTip: sourceNode.staticProp.toolTip,
+        control: sourceNode.staticProp.control,
+        controlProps: sourceNode.dynamicProp.controlProp,
+        required: sourceNode.dynamicProp.validation?.isOptional() || false,
       },
     };
 
@@ -41,11 +42,7 @@ export function mutableNodeToImmutableNode(
     key: sourceNode.key,
     type: "nested",
     prop: {
-      label: sourceNode.schemaData?.label,
-      visible: sourceNode.dynamicProp?.visible || true,
-      disabled: sourceNode.dynamicProp?.disabled || false,
-      errorMessage: sourceNode.dynamicProp?.errorMessage,
-      alertTip: sourceNode.dynamicProp?.alertTip,
+      // label: sourceNode.?.label,
     },
     children: [],
   };
@@ -62,6 +59,7 @@ export function mutableNodeToImmutableNode(
   }
 
   snapshotInfo.lastValue = nestedField;
+
   return nestedField;
 }
 

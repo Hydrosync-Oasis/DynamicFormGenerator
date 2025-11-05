@@ -173,6 +173,7 @@ export default function TestValidatePage() {
         error: "应该抛出错误但没有",
       });
     } catch (error: any) {
+      console.error(error);
       const ageNode = model.findNodeByPath(["user", "age"]);
       const ageErrorMsg =
         ageNode?.type === "field"

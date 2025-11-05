@@ -36,7 +36,7 @@ export function getNodesOnPath(
   containsRoot?: boolean
 ): MutableFieldNode[] | undefined {
   const nodes: MutableFieldNode[] = [];
-  if (!path || path.length === 0) return undefined;
+  if (!path) return undefined;
 
   let current: MutableFieldNode | undefined = mutableModel;
   if (containsRoot) {
@@ -75,7 +75,7 @@ function compileOneNode(
       effect: new Set(),
       cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
     };
-  } else if (item.childrenFields && item.childrenFields?.length > 0) {
+  } else if (item.childrenFields) {
     return {
       key: item.key,
       path: path,
@@ -100,11 +100,11 @@ function compileOneNode(
         validation:
           item.validate || z.unknown().nonoptional({ message: "请填写！" }),
         disabled: item.disabled ?? false,
-        controlProp: item.itemProps,
+        controlProp: item.controlProps,
       },
       staticProp: {
         label: item.label || "未命名",
-        helpTip: item.helpTip,
+        toolTip: item.helpTip,
         control: item.control || "input",
       },
       snapshot: {
@@ -170,7 +170,7 @@ class FormModel {
 
   private currentVersion: number;
 
-  private listeners = new Set<(stateSchema: MutableFieldNode[]) => void>();
+  private listeners = new Set<() => void>();
 
   private rules: Set<ReactiveRule> = new Set();
 
@@ -239,7 +239,7 @@ class FormModel {
   }
 
   private notify() {
-    for (const fn of this.listeners) fn(this.mutableDataSource.children);
+    for (const fn of this.listeners) fn();
     this.currentVersion++;
   }
 
@@ -613,7 +613,8 @@ class FormModel {
             if (res?.success) {
               node.dynamicProp.errorMessage = undefined;
             } else {
-              node.dynamicProp.errorMessage = res?.error.message;
+              // 只保留第一个错误信息
+              node.dynamicProp.errorMessage = res?.error.issues[0].message;
               finalError = res?.error;
             }
           } else {
@@ -627,14 +628,15 @@ class FormModel {
               const validator = validation.validator;
               const res = validator.safeParse(value);
 
-              const errorInfo = res.error?.issues;
+              const errorIssues = res.error?.issues;
+              const errorInfo = errorIssues?.filter((e) => {
+                return isChildNode(path.concat(e.path as string[]), path);
+              });
+
               const dfs = (node: MutableFieldNode) => {
                 if (node.type === "field") {
                   const info = errorInfo?.find((e) => {
-                    return isSamePath(
-                      path.concat(e.path as string[]),
-                      node.path
-                    );
+                    return isSamePath(path.concat(e.path as string[]), path);
                   });
                   if (!info) {
                     node.dynamicProp.errorMessage = undefined;
@@ -651,8 +653,8 @@ class FormModel {
                 }
               };
               dfs(node);
-              if (!res.success) {
-                finalError = res.error;
+              if (!res.success && errorInfo) {
+                finalError = new ZodError(errorInfo);
               }
             } else if (
               validation.type === "dirty" ||
@@ -670,7 +672,6 @@ class FormModel {
       const validation = this.mutableDataSource.cache.validator;
       if (value.type === "hasValue" && validation.type === "hasValue") {
         const res = validation.validator.safeParse(value.validateData);
-        console.log(res);
 
         const info = res.success
           ? undefined
@@ -689,6 +690,8 @@ class FormModel {
                     isSamePath(x.path as string[], node.path)
                   )?.message;
                   node.dynamicProp.errorMessage = msg;
+                  console.log(122);
+
                   update(node);
                 }
                 return;
@@ -703,22 +706,24 @@ class FormModel {
           },
           this.currentVersion
         );
-        if (!res.success) {
-          finalError = res.error;
+        if (!res.success && info && info.length > 0) {
+          finalError = new ZodError(info);
         }
       } else if (value.type === "dirty" || validation.type === "dirty") {
         throw new Error("dirty value");
       }
     }
 
+    this.notify();
+
     if (!finalError) return Promise.resolve();
     else return Promise.reject(finalError);
   }
 
-  validateAllFields(enhancer?: (schema: ZodType) => ZodType): Promise<any> {
+  validateAllFields(): Promise<any> {
     // 在校验前先收集最终对象
     this.lastFinalPlainObj = this.plainCacheManager.getFinalPlainObject();
-    throw new Error("Method not implemented.");
+    return this.validateField([], false);
   }
 }
 
