@@ -6,7 +6,6 @@ export function mutableNodeToImmutableNode(
   currentVersion: number
 ): ImmutableFormState {
   const snapshotInfo = sourceNode.snapshot;
-  console.log(11);
 
   if (sourceNode.type === "field") {
     // 准备好返回的叶子结点
@@ -15,7 +14,7 @@ export function mutableNodeToImmutableNode(
       type: "field",
       prop: {
         label: sourceNode.staticProp.label!,
-        visible: sourceNode.dynamicProp.visible || true,
+        visible: sourceNode.dynamicProp.visible,
         value: sourceNode.dynamicProp.value || null,
         disabled: sourceNode.dynamicProp.disabled || false,
         errorMessage: sourceNode.dynamicProp.errorMessage,
@@ -24,7 +23,10 @@ export function mutableNodeToImmutableNode(
         toolTip: sourceNode.staticProp.toolTip,
         control: sourceNode.staticProp.control,
         controlProps: sourceNode.dynamicProp.controlProp,
-        required: sourceNode.dynamicProp.validation?.isOptional() || false,
+        required:
+          sourceNode.dynamicProp.validation?.isOptional() === undefined
+            ? false
+            : !sourceNode.dynamicProp.validation?.isOptional(),
       },
     };
 
@@ -75,6 +77,7 @@ export function setMutableNode(
   currentVersion: number
 ) {
   const nodes = getNodesOnPath(mutableModel, path, true);
+
   if (!nodes) {
     throw new Error("this path is not found.");
   }

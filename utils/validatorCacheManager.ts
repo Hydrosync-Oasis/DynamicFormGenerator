@@ -25,11 +25,11 @@ class ValidatorCacheManager {
    * 何时调用：字段 visible 发生变化，或者 validation 规则发生变化时
    */
   updateNode(node: MutableFieldNode) {
-    if (node === this.mutableDataSource) {
-      node.cache.validator.type = "dirty";
-      return;
-    }
-    const nodes = getNodesOnPath(this.mutableDataSource, node.path, true);
+    const nodes = getNodesOnPath(
+      this.mutableDataSource,
+      node.path.slice(1),
+      true
+    );
 
     nodes?.forEach((n) => {
       n.cache.validator.type = "dirty";

@@ -61,27 +61,116 @@ export type ReactiveEffect = (
   info?: { changedPath?: FieldPath }
 ) => void;
 
-export interface FieldSchema {
-  key: FieldKey;
-  label?: string;
-  isArray?: boolean;
-  validate?: ZodType;
-  control?: ControlType;
-  // 对于枚举型的字段组件：提供 options
-  options?: Array<{ label: string; value: string | number | boolean }>;
-  // 初始可见性
-  initialVisible?: boolean;
-  // 单独给字段组件设置的prop
-  controlProps?: Record<string, unknown>;
-  // 默认值
-  defaultValue?: FieldValue;
-  // 帮助说明
-  helpTip?: string | JSX.Element;
-  // 嵌套子字段
-  childrenFields?: FieldSchema[];
-  // 字段是否禁用
-  disabled?: boolean;
-}
+/**
+ * Describes the schema of a dynamic form field, supporting:
+ *
+ * - Leaf/control fields (a single input rendered by a control)
+ * - Nested object groups (a container with child fields)
+ * - Arrays of nested fields (a repeatable list of items with a shared item schema)
+ *
+ * Discriminant:
+ * - Leaf fields do not declare `isArray`.
+ * - Nested variants declare `isArray`:
+ *   - `isArray: false` => an object group with `childrenFields`.
+ *   - `isArray: true`  => an array field with `arraySchema` describing each item.
+ *
+ * Leaf/control field (no `isArray`):
+ * - key: Unique field identifier.
+ * - label: User-facing label for the field.
+ * - control: The UI control type used to render the field.
+ * - validate?: ZodType-based validator for the field value.
+ * - options?: Selectable options for choice-based controls (label/value pairs).
+ * - initialVisible?: Whether the field is initially visible.
+ * - controlProps?: Arbitrary props passed through to the control renderer.
+ * - defaultValue?: Initial/default value for the field.
+ * - helpTip?: A help text or JSX hint rendered alongside the field.
+ * - disabled?: Whether the field is disabled.
+ *
+ * Nested object group (`isArray: false`):
+ * - key: Unique identifier for the group.
+ * - isArray: false
+ * - childrenFields: An array of nested `FieldSchema2` definitions composing the object.
+ *
+ * Array of nested fields (`isArray: true`):
+ * - key: Unique identifier for the array field.
+ * - isArray: true
+ * - arraySchema: The schema for a single array item. The item schema omits `key`
+ *   (items are typically indexed rather than keyed).
+ *
+ * Remarks:
+ * - Use the leaf/control variant for standalone inputs (text, select, checkbox, etc.).
+ * - Use the object group to compose complex objects via multiple child fields.
+ * - Use the array variant for repeatable groups (e.g., a list of addresses),
+ *   where each item follows the same `arraySchema`.
+ *
+ * See also:
+ * - FieldKey: unique key type for fields.
+ * - ControlType: enumeration or union of supported UI controls.
+ * - ZodType: validation type from Zod for runtime validation.
+ * - FieldValue: type of values handled by the form.
+ *
+ * @example
+ * // Leaf field
+ *  { key: 'email', label: 'Email', control: 'text', validate: z.string().email() }
+ *
+ * @example
+ * // Nested object group
+ *  { key: 'profile', isArray: false, childrenFields: [ ...nested fields... ] }
+ *
+ * @example
+ * // Array of nested fields
+ *  { key: 'phones', isArray: true, arraySchema: { control: 'text', label: 'Phone' } }
+ */
+export type FieldSchema =
+  // 字段 (叶子结点)
+  | {
+      key: FieldKey;
+      label: string;
+      control: ControlType;
+      validate?: ZodType;
+      options?: Array<{ label: string; value: string | number | boolean }>;
+      initialVisible?: boolean;
+      controlProps?: Record<string, unknown>;
+      defaultValue?: FieldValue;
+      helpTip?: string | JSX.Element;
+      disabled?: boolean;
+    }
+  // 对象型嵌套字段
+  | {
+      key: FieldKey;
+      isArray: true;
+      arraySchema: Omit<FieldSchema, "key">;
+    }
+  // 数组型嵌套字段
+  | {
+      key: FieldKey;
+      isArray: false;
+      childrenFields: FieldSchema[];
+    };
+
+// export interface FieldSchema {
+//   key: FieldKey;
+//   label?: string;
+//   isArray?: boolean;
+//   /** 定义数组中的单个元素的结构 */
+//   arraySchema?: Omit<FieldSchema, "key">;
+//   validate?: ZodType;
+//   control?: ControlType;
+//   // 对于枚举型的字段组件：提供 options
+//   options?: Array<{ label: string; value: string | number | boolean }>;
+//   // 初始可见性
+//   initialVisible?: boolean;
+//   // 单独给字段组件设置的prop
+//   controlProps?: Record<string, unknown>;
+//   // 默认值
+//   defaultValue?: FieldValue;
+//   // 帮助说明
+//   helpTip?: string | JSX.Element;
+//   // 嵌套子字段
+//   childrenFields?: FieldSchema[];
+//   // 字段是否禁用
+//   disabled?: boolean;
+// }
 
 // 存放字段运行时的响应式字段
 export interface LeafDynamicProp {
@@ -107,6 +196,9 @@ export interface NestedFieldDynamicProp {
 
 type MutableFieldNodeBaseType = {
   key: FieldKey;
+  /**
+   * 一个包含dummy节点的路径
+   */
   path: FieldPath;
   /**
    * 如果是数组型嵌套字段下的字段，需要有一个指向最靠近根字段的属性
@@ -168,6 +260,10 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
     | {
         type: "array";
         dynamicProp: NestedFieldDynamicProp;
+        staticProp: {
+          /** 定义了数组单个元素的结构体 */
+          schema: Omit<FieldSchema, "key">;
+        };
         children: MutableFieldNode[];
       }
   );

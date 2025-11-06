@@ -126,7 +126,6 @@ const Generator = ({
     model.getSnapshot.bind(model),
     model.getSnapshot.bind(model)
   );
-  console.log(state);
 
   // 根据路径从 state 中查找节点
   const findNodeByPath = (
@@ -158,23 +157,24 @@ const Generator = ({
   // 递归渲染字段
   const renderField = (
     state: ImmutableFormState,
-    seenPath: FieldPath
+    statePath: FieldPath
   ): React.ReactNode => {
-    const path = [...seenPath, state.key.toString()];
+    const path = statePath;
 
     // 如果有子节点，那么当前节点并无内容，仅渲染子节点
     if (state.type !== "field") {
       if (state.children.length > 0) {
         return (
           <React.Fragment key={path.join(".")}>
-            {state.children.map((child) => renderField(child, path))}
+            {state.children.map((child) =>
+              renderField(child, path.concat(child.key.toString()))
+            )}
           </React.Fragment>
         );
+      } else {
+        return null;
       }
     }
-
-    // 叶子节点才渲染UI
-    if (state.type !== "field") return null;
 
     const visible = state.prop.visible;
     if (!visible) return null;
@@ -188,7 +188,10 @@ const Generator = ({
           {
             value?: FieldValue;
             onChange?: (value: FieldValue) => void;
-            options?: FieldSchema["options"];
+            options?: Array<{
+              label: string;
+              value: string | number | boolean;
+            }>;
           } & Record<string, any>
         >
       | undefined = undefined;
@@ -204,7 +207,7 @@ const Generator = ({
     const handleChange = (value: FieldValue) => {
       model.setValue(path, value, { invokeOnChange: true });
       // 可选：实时验证
-      model.validateField(path).catch(() => {
+      model.validateField(path, true).catch(() => {
         // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
       });
     };
@@ -214,7 +217,7 @@ const Generator = ({
         {/* 自定义表单项布局 */}
         <Row>
           <Col span={24}>
-            <Row>
+            <Row style={{ marginBottom: 5 }}>
               <Col offset={labelSpan} span={fieldSpan}>
                 {/* Alert提示框 */}
                 {state.prop.alertTip && (
@@ -380,7 +383,7 @@ const Generator = ({
                   console.warn(`Node not found for path: ${path.join("/")}`);
                   return null;
                 }
-                return renderField(node, []);
+                return renderField(node, path);
               })}
             </Flex>
           }

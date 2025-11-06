@@ -29,7 +29,12 @@ class PlainObjectCacheManager {
    * 何时调用：字段Value发生变化，visible发生变化时
    */
   updateNode(node: MutableFieldNode) {
-    const nodes = getNodesOnPath(this.mutableDataSource, node.path, true);
+    const nodes = getNodesOnPath(
+      this.mutableDataSource,
+      node.path.slice(1),
+      true
+    );
+
     nodes?.forEach((n) => {
       n.cache.plainObj.type = "dirty";
     });
@@ -82,9 +87,6 @@ class PlainObjectCacheManager {
                   )
                   .map((child) => submitObj[child.key])
               : submitObj;
-          if (node.type === "array") {
-            console.log(submitData);
-          }
           cache.plainObj = {
             submitData,
             // validateData 仍保留对象形态，便于后续校验与定位；类型上已兼容数组但此处保持对象
