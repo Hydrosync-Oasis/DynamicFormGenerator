@@ -22,7 +22,7 @@ import React, {
 import { FieldPath, FieldSchema, FieldValue, FormModel } from "./structures";
 import { ZodType } from "zod";
 import { InfoCircleOutlined } from "@ant-design/icons";
-import { ImmutableFormState } from "./type";
+import { ControlType, ImmutableFormState } from "./type";
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 
@@ -86,7 +86,7 @@ const useDynamicForm = (model: FormModel) => {
        * @param paths 要校验的字段路径数组
        */
       validateFields: (paths: FieldPath[]) => {
-        return model.validateFieldsWithEnhancer(
+        return model.validateFields(
           paths.filter((path) => model.get(path, "visible"))
         );
       },
@@ -94,6 +94,135 @@ const useDynamicForm = (model: FormModel) => {
 
     return hook;
   }, []);
+};
+
+/**
+ * 字段组件 - 渲染单个表单字段的控件部分
+ */
+const Field = ({
+  state,
+  size,
+  onChange,
+  id,
+}: {
+  state: ImmutableFormState;
+  size?: "normal" | "small";
+  onChange: (value: FieldValue) => void;
+  id: string;
+}) => {
+  if (state.type !== "field") {
+    throw new Error("Field component requires a field-type state");
+  }
+
+  // 从 state 中解构所有需要的属性
+  const { control, value, options, controlProps, errorMessage, disabled } =
+    state.prop;
+
+  // 判断是否为自定义组件
+  const CustomComponent =
+    typeof control !== "string"
+      ? (control as ComponentType<
+          {
+            value?: FieldValue;
+            onChange?: (value: FieldValue) => void;
+            options?: Array<{
+              label: string;
+              value: string | number | boolean;
+            }>;
+          } & Record<string, any>
+        >)
+      : undefined;
+
+  // 渲染自定义组件
+  if (CustomComponent) {
+    return (
+      <CustomComponent
+        value={value}
+        onChange={onChange}
+        options={options}
+        status={errorMessage ? "error" : undefined}
+        disabled={disabled}
+        size={size === "small" ? "small" : undefined}
+        {...controlProps}
+        id={id}
+      />
+    );
+  }
+
+  // 渲染内置组件
+  switch (control) {
+    case "input":
+      return (
+        <Input
+          {...controlProps}
+          size={size === "small" ? "small" : undefined}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          status={errorMessage ? "error" : undefined}
+          disabled={disabled}
+          id={id}
+        />
+      );
+
+    case "radio":
+      return (
+        <Radio.Group
+          className="!h-fit"
+          size={size === "small" ? "small" : undefined}
+          value={value}
+          options={options}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          id={id}
+        />
+      );
+
+    case "select":
+      return (
+        <Select
+          style={{ width: "100%" }}
+          size={size === "small" ? "small" : undefined}
+          value={value}
+          options={options}
+          onChange={(value) => onChange(value)}
+          placeholder="请选择"
+          status={errorMessage ? "error" : undefined}
+          disabled={disabled}
+          id={id}
+          {...controlProps}
+        />
+      );
+
+    default:
+      return null;
+  }
+};
+
+// 根据路径从 state 中查找节点
+const findNodeByPath = (
+  node: ImmutableFormState,
+  path: FieldPath
+): ImmutableFormState | null => {
+  if (path.length === 0) {
+    return node;
+  }
+
+  if (node.type === "field") {
+    return null;
+  }
+
+  const [first, ...rest] = path;
+  const child = node.children.find((c) => c.key === first);
+
+  if (!child) {
+    return null;
+  }
+
+  if (rest.length === 0) {
+    return child;
+  }
+
+  return findNodeByPath(child, rest);
 };
 
 const Generator = ({
@@ -127,34 +256,7 @@ const Generator = ({
     model.getSnapshot.bind(model)
   );
 
-  // 根据路径从 state 中查找节点
-  const findNodeByPath = (
-    node: ImmutableFormState,
-    path: FieldPath
-  ): ImmutableFormState | null => {
-    if (path.length === 0) {
-      return node;
-    }
-
-    if (node.type === "field") {
-      return null;
-    }
-
-    const [first, ...rest] = path;
-    const child = node.children.find((c) => c.key === first);
-
-    if (!child) {
-      return null;
-    }
-
-    if (rest.length === 0) {
-      return child;
-    }
-
-    return findNodeByPath(child, rest);
-  };
-
-  // 递归渲染字段
+  // 递归渲染字段的函数
   const renderField = (
     state: ImmutableFormState,
     statePath: FieldPath
@@ -179,29 +281,9 @@ const Generator = ({
     const visible = state.prop.visible;
     if (!visible) return null;
 
-    const { label, control, options, controlProps: itemProps } = state.prop!;
+    const { label, controlProps } = state.prop!;
 
     const isRequired = state.prop.required;
-
-    let CustomComponent:
-      | ComponentType<
-          {
-            value?: FieldValue;
-            onChange?: (value: FieldValue) => void;
-            options?: Array<{
-              label: string;
-              value: string | number | boolean;
-            }>;
-          } & Record<string, any>
-        >
-      | undefined = undefined;
-
-    if (typeof control !== "string") {
-      CustomComponent = control;
-    }
-    if (state.type !== "field") {
-      throw new Error("non-leaf node");
-    }
 
     // 处理字段值变化的回调
     const handleChange = (value: FieldValue) => {
@@ -290,53 +372,13 @@ const Generator = ({
                   alignItems: "center",
                 }}
               >
-                {/* 三选一逻辑：自定义组件 > 控件类型(input/radio) */}
                 <div style={{ flex: 1 }}>
-                  {CustomComponent ? (
-                    <CustomComponent
-                      value={state.prop.value}
-                      onChange={handleChange}
-                      options={state.prop.options || options}
-                      status={state.prop.errorMessage ? "error" : undefined}
-                      disabled={state.prop.disabled}
-                      size={size === "small" ? "small" : undefined}
-                      {...itemProps}
-                      id={path.join("/")}
-                    />
-                  ) : control === "input" ? (
-                    <Input
-                      {...itemProps}
-                      size={size === "small" ? "small" : undefined}
-                      value={state.prop.value}
-                      onChange={(e) => handleChange(e.target.value)}
-                      status={state.prop.errorMessage ? "error" : undefined}
-                      disabled={state.prop.disabled}
-                      id={path.join("/")}
-                    />
-                  ) : control === "radio" ? (
-                    <Radio.Group
-                      className="!h-fit"
-                      size={size === "small" ? "small" : undefined}
-                      value={state.prop.value}
-                      options={state.prop.options || options}
-                      onChange={(e) => handleChange(e.target.value)}
-                      disabled={state.prop.disabled}
-                      id={path.join("/")}
-                    />
-                  ) : control === "select" ? (
-                    <Select
-                      style={{ width: "100%" }}
-                      size={size === "small" ? "small" : undefined}
-                      value={state.prop.value}
-                      options={state.prop.options || options}
-                      onChange={(value) => handleChange(value)}
-                      placeholder="请选择"
-                      status={state.prop.errorMessage ? "error" : undefined}
-                      disabled={state.prop.disabled}
-                      id={path.join("/")}
-                      {...itemProps}
-                    />
-                  ) : null}
+                  <Field
+                    state={state}
+                    size={size}
+                    onChange={handleChange}
+                    id={path.join("/")}
+                  />
                 </div>
               </Col>
             </Row>

@@ -68,7 +68,7 @@ function compileOneNode(
   path: FieldPath,
   currentVersion: number
 ): MutableFieldNode {
-  if (item.isArray) {
+  if ("isArray" in item && item.isArray) {
     return {
       key: item.key,
       path: path,
@@ -85,7 +85,7 @@ function compileOneNode(
       effect: new Set(),
       cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
     };
-  } else if (item.childrenFields) {
+  } else if ("isArray" in item && !item.isArray) {
     return {
       key: item.key,
       path: path,
@@ -128,7 +128,11 @@ function compileOneNode(
 }
 
 const compileNodes = (
-  schema: FieldSchema,
+  schema: FieldSchema &
+    (
+      | { isArray: false; childrenFields: FieldSchema[] }
+      | { isArray: true; arraySchema: Omit<FieldSchema, "key"> }
+    ),
   cur: MutableFieldNode & { type: "object" | "array" },
   seenPath: FieldPath,
   currentVersion: number,
@@ -143,24 +147,36 @@ const compileNodes = (
     cur.rootArrayField = root;
   }
 
-  for (let item of schema.childrenFields || []) {
+  if (schema.isArray === false) {
+    for (let schemaItem of schema.childrenFields || []) {
+      const newNode: MutableFieldNode = compileOneNode(
+        schemaItem,
+        [...seenPath, schemaItem.key],
+        currentVersion
+      );
+
+      if (newNode.type !== "field" && "isArray" in schemaItem) {
+        compileNodes(
+          schemaItem,
+          newNode,
+          [...seenPath, schemaItem.key],
+          currentVersion,
+          root
+        );
+      } else {
+        // 否则是叶子结点不需要继续递归
+      }
+
+      cur.children.push(newNode);
+    }
+  } else {
+    // 数组型字段是动态的，和数据有关，在这里直接结束，不能继续递归
     const newNode: MutableFieldNode = compileOneNode(
-      item,
-      [...seenPath, item.key],
+      schema,
+      [...seenPath, schema.key],
       currentVersion
     );
-
-    if (newNode.type !== "field") {
-      compileNodes(
-        item,
-        newNode,
-        [...seenPath, item.key],
-        currentVersion,
-        root
-      );
-    }
-
-    cur.children.push(newNode);
+    return newNode;
   }
 };
 
@@ -204,6 +220,7 @@ class FormModel {
       {
         childrenFields: schema.fields,
         key: "",
+        isArray: false,
       },
       this.mutableDataSource,
       ["dummy"],
@@ -255,7 +272,7 @@ class FormModel {
 
   private notify() {
     for (const fn of this.listeners) fn();
-    this.currentVersion++;
+    // this.currentVersion++;
   }
 
   get(path: FieldPath, prop: "value" | "errorMessage" | "visible"): any {
@@ -267,7 +284,12 @@ class FormModel {
     }
     // 对于非叶子节点，如果要获取value，返回undefined或者抛出错误
     if (node.type === "array") {
-      return node.children;
+      this.plainCacheManager.rebuild();
+      if (node.cache.plainObj.type !== "hasValue") {
+        return {};
+      } else {
+        return node.cache.plainObj.objectOnlyIncludesHidden;
+      }
     } else if (node.type === "field") {
       return node.dynamicProp[prop];
     } else {
@@ -308,6 +330,8 @@ class FormModel {
     );
 
     this.validatorCacheManager.rebuild();
+    console.log(this.mutableDataSource);
+
     this.plainCacheManager.rebuild();
     this.notify();
   }
@@ -384,8 +408,29 @@ class FormModel {
       throw new Error("the field is not leaf-node:" + path);
     }
 
-    node.dynamicProp.validation = validator;
-    this.validatorCacheManager.updateNode(node);
+    // 检查新旧 validator 的 isOptional 状态是否不同
+    const oldIsOptional = node.dynamicProp.validation?.isOptional() ?? false;
+    const newIsOptional = validator.isOptional();
+
+    if (oldIsOptional !== newIsOptional) {
+      // 如果 isOptional 状态改变，使用 setMutableNode 通知变更
+      setMutableNode(
+        this.mutableDataSource,
+        path,
+        (node, _nodes, update) => {
+          if (node.type === "field") {
+            node.dynamicProp.validation = validator;
+            this.validatorCacheManager.updateNode(node);
+            update(node);
+          }
+        },
+        this.currentVersion
+      );
+    } else {
+      // 如果 isOptional 状态未改变，直接更新
+      node.dynamicProp.validation = validator;
+      this.validatorCacheManager.updateNode(node);
+    }
   }
 
   setRefiner(path: FieldPath, refiner: (z: ZodType) => ZodType) {
@@ -479,6 +524,7 @@ class FormModel {
       {
         get: (path: FieldPath, isDependency: boolean = true) => {
           if (isDependency) deps.push(path);
+
           // During dependency collection we don't need the concrete value
           // and we must satisfy the return type
           return undefined as any;
@@ -486,7 +532,7 @@ class FormModel {
         setVisible: () => void 0,
         setValue: () => void 0,
         setValidation: () => void 0,
-        updateChildren: () => void 0,
+        setArray: () => void 0,
         setAlertTip: () => void 0,
         setDisable: () => void 0,
       },
@@ -512,7 +558,7 @@ class FormModel {
   }
 
   /** 主动触发一次全量规则（初始化时可用） */
-  runAllRules() {
+  initial() {
     this.runEffects(
       new Set(
         [...this.rules].map((r) => {
@@ -521,6 +567,9 @@ class FormModel {
       ),
       "initial-run"
     );
+    this.plainCacheManager.rebuild();
+    this.validatorCacheManager.rebuild();
+    this.notify();
   }
 
   /**
@@ -540,8 +589,8 @@ class FormModel {
           setValue: (path, value, option) => this.setValue(path, value, option),
           setValidation: (path, validator) =>
             this.setValidation(path, validator as any),
-          updateChildren: (path, chilren, option) => {
-            throw new Error("not implemented");
+          setArray: (path, chilren, option) => {
+            this.setArray(path, chilren, option);
           },
           // this.updateChildren(path, chilren, option),
           setAlertTip: (path, content) => this.setAlertTip(path, content),
@@ -565,11 +614,16 @@ class FormModel {
     this.runEffects(list, cause, { changedPath: depFieldPath });
   }
 
-  updateChildren(path: FieldPath, value: Record<string, any>) {
+  setArray(
+    path: FieldPath,
+    value: Record<string, any>,
+    option?: { shouldTriggerRule?: boolean }
+  ) {
     const dfs = (
       value: Record<string, any>,
       schema: FieldSchema,
-      path: FieldPath
+      path: FieldPath,
+      rootArrayField: MutableFieldNode & { type: "array" }
     ): MutableFieldNode => {
       if (!("isArray" in schema)) {
         // 返回一个field type的节点
@@ -577,6 +631,7 @@ class FormModel {
         if (field.type !== "field") {
           throw new Error("schema mismatch for field node");
         }
+        field.rootArrayField = rootArrayField;
         field.dynamicProp.value = value;
         return field;
       }
@@ -588,13 +643,14 @@ class FormModel {
           this.currentVersion
         ) as MutableFieldNode & { type: "array" };
         node.children = children;
+        node.rootArrayField = rootArrayField;
         // value输入可以是数组，也可以是一个对象，如果是对象，那么对象的key就是字段的key
         Object.entries(value).forEach(([k, v]) => {
           const childSchema: FieldSchema = {
             ...schema.arraySchema,
             key: k,
-          };
-          children.push(dfs(v, childSchema, [...path, k]));
+          } as FieldSchema;
+          children.push(dfs(v, childSchema, [...path, k], rootArrayField));
         });
 
         return node;
@@ -606,13 +662,16 @@ class FormModel {
           this.currentVersion
         ) as MutableFieldNode & { type: "object" };
         node.children = children;
+        node.rootArrayField = rootArrayField;
         // value输入是一个对象
         Object.entries(value).forEach(([k, v]) => {
           children.push(
-            dfs(v, schema.childrenFields!.find((x) => x.key === k)!, [
-              ...path,
-              k,
-            ])
+            dfs(
+              v,
+              schema.childrenFields!.find((x) => x.key === k)!,
+              [...path, k],
+              rootArrayField
+            )
           );
         });
         return node;
@@ -631,11 +690,11 @@ class FormModel {
         isArray: true,
         arraySchema: schema,
       },
-      ["dummy", ...path]
+      ["dummy", ...path],
+      node
     ) as MutableFieldNode & {
       type: "array";
     };
-    console.log(newNode);
 
     setMutableNode(
       this.mutableDataSource,
@@ -650,6 +709,11 @@ class FormModel {
     );
     this.plainCacheManager.updateNode(node);
     this.validatorCacheManager.updateNode(node);
+
+    if (option?.shouldTriggerRule) {
+      this.triggerEffectsFor(path, "children-updated");
+    }
+
     this.notify();
   }
 
@@ -683,16 +747,28 @@ class FormModel {
    * 全量JSON
    * @returns 保持嵌套结构的数据对象
    */
-  getJSONData(): Record<string, any> {
+  getJSONData(path?: FieldPath): Record<string, any> {
     // 使用最终对象缓存管理器收集并返回；若无值则返回空对象
+    if (path) {
+      this.plainCacheManager.rebuild();
+      const cache = this.findNodeByPath(path)?.cache.plainObj;
+      if (cache?.type === "hasValue") {
+        return cache.submitData || {};
+      } else if (cache?.type === "hidden") {
+        return {};
+      } else {
+        throw new Error("dirty value");
+      }
+    }
     return this.plainCacheManager.getFinalPlainObject() ?? {};
   }
 
-  /** 校验指定路径，校验时自动带上父字段上定义的enhancer，可跨字段校验 */
-  validateFieldsWithEnhancer(pathargs: FieldPath[]): Promise<any> {
-    // 在校验前先收集最终对象
-    this.lastFinalPlainObj = this.plainCacheManager.getFinalPlainObject(false);
-    throw new Error("Method not implemented.");
+  /** 校验指定路径，校验时自动带上父字段上定义的enhancer，所以可跨字段校验 */
+  validateFields(pathargs: FieldPath[]): Promise<any> {
+    const promises = pathargs.map((path) => {
+      return this.validateField(path, true);
+    });
+    return Promise.all(promises);
   }
 
   /** 校验某一个字段，如果是一个嵌套字段，校验内部嵌套的所有可见字段；仅设置该字段的错误信息，
@@ -710,6 +786,7 @@ class FormModel {
         path,
         (node, _nodes, update) => {
           if (node.type === "field") {
+            // 单字段校验
             const res = node.dynamicProp.validation?.safeParse(
               node.dynamicProp.value
             );
@@ -727,14 +804,13 @@ class FormModel {
               validation.type === "hasValue" &&
               plainObj.type === "hasValue"
             ) {
-              const value = plainObj.validateData;
+              // 校验全对象
+              const value = plainObj.objectOnly;
               const validator = validation.validator;
               const res = validator.safeParse(value);
 
               const errorIssues = res.error?.issues;
-              const errorInfo = errorIssues?.filter((e) => {
-                return isChildNode(path.concat(e.path as string[]), path);
-              });
+              const errorInfo = errorIssues;
 
               const dfs = (node: MutableFieldNode) => {
                 if (node.type === "field") {
@@ -778,40 +854,39 @@ class FormModel {
       const value = this.mutableDataSource.cache.plainObj;
       const validation = this.mutableDataSource.cache.validator;
       if (value.type === "hasValue" && validation.type === "hasValue") {
-        const res = validation.validator.safeParse(value.validateData);
-        console.log(res.error?.issues);
+        const res = validation.validator.safeParse(value.objectOnly);
 
         const info = res.success
           ? undefined
           : res.error.issues.filter((e) =>
               isChildNode(e.path as string[], path)
             );
-        console.log(info);
 
         setMutableNode(
           this.mutableDataSource,
           path,
-          (node, _nodes, update) => {
-            const dfs = (node: MutableFieldNode) => {
+          (node, _nodes, mutate) => {
+            const dfs = (node: MutableFieldNode): boolean => {
               if (node.type === "field") {
                 if (isChildNode(node.path.slice(1), path)) {
                   const msg = info?.find((x) => {
-                    console.log(x.path, path);
-
                     return isSamePath(x.path as string[], path);
                   })?.message;
-                  console.log(msg);
-
                   node.dynamicProp.errorMessage = msg;
-                  update(node);
+                  mutate(node);
+                  return true;
                 }
-                return;
+                return false;
               }
 
+              let hasMutate = false;
               for (let i of node.children) {
-                dfs(i);
-                update(i);
+                if (dfs(i)) {
+                  mutate(i);
+                  hasMutate = true;
+                }
               }
+              return hasMutate;
             };
             dfs(node);
           },

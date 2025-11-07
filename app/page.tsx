@@ -1,5 +1,3 @@
-﻿import AppPage from "./app-page";
-
-export default function Page() {
-  return <AppPage></AppPage>;
+﻿export default function Page() {
+  return <>hello world</>;
 }

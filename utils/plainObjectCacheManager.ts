@@ -53,11 +53,15 @@ class PlainObjectCacheManager {
         if (visible) {
           cache.plainObj = {
             submitData: node.dynamicProp.value,
-            validateData: node.dynamicProp.value,
+            objectOnly: node.dynamicProp.value,
+            objectOnlyIncludesHidden: node.dynamicProp.value,
             type: "hasValue",
           };
         } else {
-          cache.plainObj = { type: "hidden" };
+          cache.plainObj = {
+            type: "hidden",
+            objectOnlyIncludesHidden: node.dynamicProp.value,
+          };
         }
 
         return cache.plainObj;
@@ -66,14 +70,16 @@ class PlainObjectCacheManager {
           return cache.plainObj;
         }
         const validateObj: Record<string, any> = {};
+        const objOnlyIncludesHdn: Record<string, any> = {};
         const submitObj: Record<string, any> = {};
         for (let i of node.children) {
           const res = dfs(i);
           // 一定不是undefined了
           if (res && res.type === "hasValue") {
-            validateObj[i.key] = res.validateData;
+            validateObj[i.key] = res.objectOnly;
             submitObj[i.key] = res.submitData;
           }
+          objOnlyIncludesHdn[i.key] = res.objectOnlyIncludesHidden;
         }
 
         if (Object.keys(validateObj).length > 0) {
@@ -89,12 +95,15 @@ class PlainObjectCacheManager {
               : submitObj;
           cache.plainObj = {
             submitData,
-            // validateData 仍保留对象形态，便于后续校验与定位；类型上已兼容数组但此处保持对象
-            validateData: validateObj,
+            objectOnly: validateObj,
+            objectOnlyIncludesHidden: objOnlyIncludesHdn,
             type: "hasValue",
           };
         } else {
-          cache.plainObj = { type: "hidden" };
+          cache.plainObj = {
+            type: "hidden",
+            objectOnlyIncludesHidden: objOnlyIncludesHdn,
+          };
         }
 
         return cache.plainObj;
@@ -105,7 +114,7 @@ class PlainObjectCacheManager {
     this.mutableDataSource.cache.plainObj = res;
     if (res.type === "hasValue") {
       this.finalData = {
-        validatData: res.validateData,
+        validatData: res.objectOnly,
         submitData: res.submitData,
       };
     } else {

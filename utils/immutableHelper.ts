@@ -24,9 +24,9 @@ export function mutableNodeToImmutableNode(
         control: sourceNode.staticProp.control,
         controlProps: sourceNode.dynamicProp.controlProp,
         required:
-          sourceNode.dynamicProp.validation?.isOptional() === undefined
+          sourceNode.dynamicProp.validation === undefined
             ? false
-            : !sourceNode.dynamicProp.validation?.isOptional(),
+            : !sourceNode.dynamicProp.validation.isOptional(),
       },
     };
 
@@ -72,7 +72,7 @@ export function setMutableNode(
     node: MutableFieldNode,
     nodesOnPath: MutableFieldNode[],
     /**用于标记此处发生改变的函数，会对这里生成全新的不可变对象 */
-    update: (node: MutableFieldNode) => void
+    mutate: (node: MutableFieldNode) => void
   ) => void,
   currentVersion: number
 ) {

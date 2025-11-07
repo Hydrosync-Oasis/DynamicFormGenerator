@@ -93,3 +93,67 @@ FormSchema --定义字段结构/校验/控件--> FormModel --响应式状态 & �
   - 通过规则自动生成摘要字段，并在页签切换时调用 `form.validateFields` 保持校验实时。
 
 将本说明与示例代码结合阅读，可以快速掌握动态表单生成器的高级功能与使用范式。
+
+## 简单示例：条件显示 + 跨字段校验
+
+下面示例展示：
+
+1. 字段 `companyName` 仅当 `userType` 为 `company` 时显示。
+2. `startAge` 与 `endAge` 做跨字段校验：结束年龄必须 ≥ 起始年龄。
+3. 使用根级 `refine` 同时实现“条件必填 + 跨字段逻辑”。
+
+示例页面路径：`app/dynamic-example/page.tsx`
+
+要点：
+
+- 使用 `model.registerRule` 收集依赖（`userType` 等），在规则里调用 `ctx.setVisible` 控制显示，`ctx.setValidation` 动态切换 required。
+- 通过 `model.setRefiner([], refine)` 在根级注入一次 `superRefine`，实现跨字段校验（例如 `endAge >= startAge`）。
+- 页面通过 `useDynamicForm` 获取操作方法，`form.submit()` 会先校验再返回数据。
+
+核心片段（节选）：
+
+```ts
+// 1) 根级跨字段校验
+model.setRefiner([], (base) =>
+  base.superRefine((data, rctx) => {
+    if (data.userType === "company" && !data.companyName) {
+      rctx.addIssue({
+        code: "custom",
+        path: ["companyName"],
+        message: "公司名称必填",
+      });
+    }
+    if (
+      typeof data.startAge === "number" &&
+      typeof data.endAge === "number" &&
+      data.endAge < data.startAge
+    ) {
+      rctx.addIssue({
+        code: "custom",
+        path: ["endAge"],
+        message: "结束年龄必须 ≥ 起始年龄",
+      });
+    }
+  })
+);
+
+// 2) 条件显示 + 动态 required
+const stop = model.registerRule((ctx) => {
+  const userType = ctx.get(["userType"]);
+  ctx.setVisible(["companyName"], userType === "company");
+  if (userType === "company") {
+    ctx.setValidation(
+      ["companyName"],
+      z.string().min(1, { message: "请输入公司名称" })
+    );
+  } else {
+    ctx.setValidation(["companyName"], z.string().optional());
+  }
+});
+```
+
+完整代码请查看新增页面文件。你可以在此基础上继续扩展：
+
+- 条件必填（动态 required）
+- 多字段互斥 / 组合校验
+- 动态数组项的联动和跨项校验

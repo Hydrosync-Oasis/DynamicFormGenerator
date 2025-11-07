@@ -40,10 +40,10 @@ export type ReactiveEffectContext = {
     option?: { invokeOnChange?: boolean; invokeEffect?: boolean }
   ) => void;
   setValidation: (path: FieldPath, validator: ZodType) => void;
-  updateChildren: (
+  setArray: (
     path: FieldPath,
-    value: FieldSchema[],
-    option?: { keepPreviousData?: boolean; shouldTriggerRule?: boolean }
+    value: Record<string, any>,
+    option?: { shouldTriggerRule?: boolean }
   ) => void;
   setAlertTip: (path: FieldPath, content: React.ReactNode) => void;
   /** 设置字段禁用状态；若 path 指向非叶子，则批量设置其所有后代叶子 */
@@ -148,30 +148,6 @@ export type FieldSchema =
       childrenFields: FieldSchema[];
     };
 
-// export interface FieldSchema {
-//   key: FieldKey;
-//   label?: string;
-//   isArray?: boolean;
-//   /** 定义数组中的单个元素的结构 */
-//   arraySchema?: Omit<FieldSchema, "key">;
-//   validate?: ZodType;
-//   control?: ControlType;
-//   // 对于枚举型的字段组件：提供 options
-//   options?: Array<{ label: string; value: string | number | boolean }>;
-//   // 初始可见性
-//   initialVisible?: boolean;
-//   // 单独给字段组件设置的prop
-//   controlProps?: Record<string, unknown>;
-//   // 默认值
-//   defaultValue?: FieldValue;
-//   // 帮助说明
-//   helpTip?: string | JSX.Element;
-//   // 嵌套子字段
-//   childrenFields?: FieldSchema[];
-//   // 字段是否禁用
-//   disabled?: boolean;
-// }
-
 // 存放字段运行时的响应式字段
 export interface LeafDynamicProp {
   value?: FieldValue;
@@ -220,11 +196,13 @@ export type NodeCache = {
   /** 存储表单提交后导出的普通对象的缓存 */
   plainObj:
     | {
-        validateData: Record<string, any> | undefined;
+        objectOnly: Record<string, any> | undefined;
         submitData: Record<string, any> | undefined;
+        objectOnlyIncludesHidden: Record<string, any> | undefined;
         type: "hasValue";
       }
     | {
+        objectOnlyIncludesHidden: Record<string, any> | undefined;
         type: "hidden";
       }
     | {
