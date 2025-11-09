@@ -18,11 +18,14 @@ import React, {
   ComponentType,
   useSyncExternalStore,
   useMemo,
+  useCallback,
 } from "react";
 import { FieldPath, FieldSchema, FieldValue, FormModel } from "./structures";
 import { ZodType } from "zod";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import { ControlType, ImmutableFormState } from "./type";
+import { findNodeByPath } from "./helper";
+import debounce from "lodash/debounce";
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 
@@ -97,202 +100,88 @@ const useDynamicForm = (model: FormModel) => {
 };
 
 /**
- * 字段组件 - 渲染单个表单字段的控件部分
+ * 字段组件 - 渲染单个表单字段的完整布局（包括标签、控件、错误信息等）
  */
-const Field = ({
-  state,
-  size,
-  onChange,
-  id,
-}: {
-  state: ImmutableFormState;
-  size?: "normal" | "small";
-  onChange: (value: FieldValue) => void;
-  id: string;
-}) => {
-  if (state.type !== "field") {
-    throw new Error("Field component requires a field-type state");
-  }
+export const DefaultFieldDisplay = React.memo(
+  ({
+    displayOption,
+    state,
+    onChange,
+  }: {
+    displayOption?: {
+      labelSpan?: number;
+      fieldSpan?: number;
+    };
+    state: ImmutableFormState;
+    onChange: (value: FieldValue, path: FieldPath) => void;
+  }) => {
+    const labelSpan = displayOption?.labelSpan ?? 4;
+    const fieldSpan = displayOption?.fieldSpan ?? 20;
 
-  // 从 state 中解构所有需要的属性
-  const { control, value, options, controlProps, errorMessage, disabled } =
-    state.prop;
-
-  // 判断是否为自定义组件
-  const CustomComponent =
-    typeof control !== "string"
-      ? (control as ComponentType<
-          {
-            value?: FieldValue;
-            onChange?: (value: FieldValue) => void;
-            options?: Array<{
-              label: string;
-              value: string | number | boolean;
-            }>;
-          } & Record<string, any>
-        >)
-      : undefined;
-
-  // 渲染自定义组件
-  if (CustomComponent) {
-    return (
-      <CustomComponent
-        value={value}
-        onChange={onChange}
-        options={options}
-        status={errorMessage ? "error" : undefined}
-        disabled={disabled}
-        size={size === "small" ? "small" : undefined}
-        {...controlProps}
-        id={id}
-      />
-    );
-  }
-
-  // 渲染内置组件
-  switch (control) {
-    case "input":
-      return (
-        <Input
-          {...controlProps}
-          size={size === "small" ? "small" : undefined}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          status={errorMessage ? "error" : undefined}
-          disabled={disabled}
-          id={id}
-        />
-      );
-
-    case "radio":
-      return (
-        <Radio.Group
-          className="!h-fit"
-          size={size === "small" ? "small" : undefined}
-          value={value}
-          options={options}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-          id={id}
-        />
-      );
-
-    case "select":
-      return (
-        <Select
-          style={{ width: "100%" }}
-          size={size === "small" ? "small" : undefined}
-          value={value}
-          options={options}
-          onChange={(value) => onChange(value)}
-          placeholder="请选择"
-          status={errorMessage ? "error" : undefined}
-          disabled={disabled}
-          id={id}
-          {...controlProps}
-        />
-      );
-
-    default:
-      return null;
-  }
-};
-
-// 根据路径从 state 中查找节点
-const findNodeByPath = (
-  node: ImmutableFormState,
-  path: FieldPath
-): ImmutableFormState | null => {
-  if (path.length === 0) {
-    return node;
-  }
-
-  if (node.type === "field") {
-    return null;
-  }
-
-  const [first, ...rest] = path;
-  const child = node.children.find((c) => c.key === first);
-
-  if (!child) {
-    return null;
-  }
-
-  if (rest.length === 0) {
-    return child;
-  }
-
-  return findNodeByPath(child, rest);
-};
-
-const Generator = ({
-  model,
-  displayFields,
-  size,
-  displayOption,
-  inlineMaxPerRow = 3,
-}: {
-  model: FormModel;
-  displayFields: FieldPath[];
-  size?: "normal" | "small";
-  displayOption?: {
-    labelSpan?: number;
-    fieldSpan?: number;
-    showDebug?: boolean;
-    showInline?: boolean;
-  };
-  inlineMaxPerRow?: number;
-}) => {
-  const isSmall = size === "small";
-  const labelSpan = displayOption?.labelSpan ?? 4;
-  const fieldSpan = displayOption?.fieldSpan ?? 20;
-  const showInline = displayOption?.showInline ?? false;
-  const showDebug = displayOption?.showDebug ?? false;
-
-  // 获取不可变快照，利用useSES更新
-  const state = useSyncExternalStore(
-    model.subscribe.bind(model),
-    model.getSnapshot.bind(model),
-    model.getSnapshot.bind(model)
-  );
-
-  // 递归渲染字段的函数
-  const renderField = (
-    state: ImmutableFormState,
-    statePath: FieldPath
-  ): React.ReactNode => {
-    const path = statePath;
-
-    // 如果有子节点，那么当前节点并无内容，仅渲染子节点
     if (state.type !== "field") {
-      if (state.children.length > 0) {
-        return (
-          <React.Fragment key={path.join(".")}>
-            {state.children.map((child) =>
-              renderField(child, path.concat(child.key.toString()))
-            )}
-          </React.Fragment>
-        );
-      } else {
-        return null;
-      }
+      throw new Error("Field component requires a field-type state");
     }
+    const path = state.path.slice(1); // 去掉 dummy 根节点的路径部分
 
-    const visible = state.prop.visible;
+    // 从 state 中解构所有需要的属性
+    const {
+      control: Control,
+      value,
+      controlProps,
+      errorMessage,
+      label,
+      required: isRequired,
+      toolTip,
+      alertTip,
+      visible,
+    } = state.prop;
+
+    // 如果不可见，不渲染
     if (!visible) return null;
 
-    const { label, controlProps } = state.prop!;
+    let FormFieldRenderer: React.ReactElement | undefined = undefined;
 
-    const isRequired = state.prop.required;
-
-    // 处理字段值变化的回调
-    const handleChange = (value: FieldValue) => {
-      model.setValue(path, value, { invokeOnChange: true });
-      // 可选：实时验证
-      model.validateField(path, true).catch(() => {
-        // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
-      });
-    };
+    if (typeof Control !== "string" && Control !== undefined) {
+      FormFieldRenderer = (
+        <Control
+          id={path.join("/")}
+          value={value}
+          {...controlProps}
+          onChange={(value) => onChange(value, path)}
+        />
+      );
+    } else if (Control === "input") {
+      FormFieldRenderer = (
+        <Input
+          id={path.join("/")}
+          value={value}
+          status={errorMessage && "error"}
+          {...controlProps}
+          onChange={(e) => onChange(e.target.value, path)}
+        />
+      );
+    } else if (Control === "select") {
+      FormFieldRenderer = (
+        <Select
+          id={path.join("/")}
+          value={value}
+          status={errorMessage && "error"}
+          {...controlProps}
+          onChange={(value) => onChange(value, path)}
+        />
+      );
+    } else if (Control === "radio") {
+      FormFieldRenderer = (
+        <Radio.Group
+          id={path.join("/")}
+          value={value}
+          {...controlProps}
+          onChange={(value) => onChange(value.target.value, path)}
+        />
+      );
+    } else {
+      throw new Error(`Unsupported control type: ${Control}`);
+    }
 
     return (
       <React.Fragment key={path.join("/")}>
@@ -302,7 +191,7 @@ const Generator = ({
             <Row style={{ marginBottom: 5 }}>
               <Col offset={labelSpan} span={fieldSpan}>
                 {/* Alert提示框 */}
-                {state.prop.alertTip && (
+                {alertTip && (
                   <ConfigProvider
                     theme={{
                       token: {
@@ -315,7 +204,7 @@ const Generator = ({
                       },
                     }}
                   >
-                    <Alert message={state.prop.alertTip} type="warning" />
+                    <Alert message={alertTip} type="warning" />
                   </ConfigProvider>
                 )}
               </Col>
@@ -325,8 +214,8 @@ const Generator = ({
                 span={labelSpan}
                 style={{
                   textAlign: "right",
-                  paddingRight: isSmall ? "4px" : "8px",
-                  lineHeight: isSmall ? "24px" : "32px",
+                  paddingRight: "8px",
+                  lineHeight: "32px",
                 }}
               >
                 {/* 标签+冒号 */}
@@ -341,9 +230,9 @@ const Generator = ({
                 >
                   <span>:</span>
                   <>
-                    {state.prop.toolTip ? (
+                    {toolTip ? (
                       <>
-                        <Tooltip title={state.prop.toolTip}>
+                        <Tooltip title={toolTip}>
                           <InfoCircleOutlined
                             twoToneColor="#8C8C8C"
                             style={{ opacity: 0.48 }}
@@ -372,27 +261,20 @@ const Generator = ({
                   alignItems: "center",
                 }}
               >
-                <div style={{ flex: 1 }}>
-                  <Field
-                    state={state}
-                    size={size}
-                    onChange={handleChange}
-                    id={path.join("/")}
-                  />
-                </div>
+                <div style={{ flex: 1 }}>{FormFieldRenderer}</div>
               </Col>
             </Row>
             {/* 校验错误信息 */}
             <Row>
               <Col offset={labelSpan} span={fieldSpan}>
-                {state.prop.errorMessage && (
+                {errorMessage && (
                   <div
                     style={{
                       color: "#ff4d4f",
-                      fontSize: isSmall ? "12px" : "13px",
+                      fontSize: "13px",
                     }}
                   >
-                    {state.prop.errorMessage}
+                    {errorMessage}
                   </div>
                 )}
               </Col>
@@ -401,16 +283,92 @@ const Generator = ({
         </Row>
       </React.Fragment>
     );
+  }
+);
+
+const Generator = ({
+  model,
+  displayFields,
+  displayOption,
+}: {
+  model: FormModel;
+  displayFields: FieldPath[];
+  displayOption?: {
+    showDebug?: boolean;
+  };
+  inlineMaxPerRow?: number;
+}) => {
+  const showDebug = displayOption?.showDebug ?? false;
+
+  // 获取不可变快照，利用useSES更新
+  const state = useSyncExternalStore(
+    model.subscribe.bind(model),
+    model.getSnapshot.bind(model),
+    model.getSnapshot.bind(model)
+  );
+  // 处理字段值变化的回调
+  const handleChange = (value: FieldValue, path: FieldPath) => {
+    model.setValue(path, value, { invokeOnChange: true });
+    // 可选：实时验证
+    model.validateField(path, true).catch(() => {
+      // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
+    });
+  };
+  const changeCallback = useCallback((value: FieldValue, path: FieldPath) => {
+    handleChange(value, path);
+  }, []);
+
+  // 递归渲染字段的函数
+  const renderField = (state: ImmutableFormState): React.ReactNode => {
+    const path = state.path.slice(1); // 去掉 dummy 根节点的路径部分
+
+    // 如果有子节点，那么当前节点并无内容，仅渲染子节点
+    if (state.type !== "field") {
+      if (state.children.length > 0) {
+        // 渲染所有子节点
+        const childrenNodes = state.children.map((child) => renderField(child));
+
+        // 如果有自定义布局组件，使用它来包裹子节点
+        if (state.LayoutComponent) {
+          return (
+            <state.LayoutComponent key={path.join(".")} state={state}>
+              {childrenNodes}
+            </state.LayoutComponent>
+          );
+        }
+
+        // 否则使用默认的 Fragment 包裹
+        return (
+          <React.Fragment key={path.join(".")}>{childrenNodes}</React.Fragment>
+        );
+      } else {
+        return null;
+      }
+    }
+
+    // 直接返回 Field 组件，它会处理所有的布局和可见性逻辑
+    return !state.FieldDisplayComponent ? (
+      <DefaultFieldDisplay
+        key={path.join("/")}
+        state={state}
+        onChange={changeCallback}
+      />
+    ) : (
+      <state.FieldDisplayComponent
+        key={path.join("/")}
+        state={state}
+        onChange={changeCallback}
+      />
+    );
   };
 
   return (
     <>
       <ConfigProvider
-        componentSize={size === "small" ? "small" : undefined}
         theme={{
           components: {
             Alert: {
-              defaultPadding: isSmall ? "1px 6px" : "2px 7px",
+              defaultPadding: "2px 7px",
             },
           },
           token: { borderRadiusLG: 3, borderRadius: 2 },
@@ -418,19 +376,20 @@ const Generator = ({
       >
         <div>
           {
-            <Flex gap={isSmall ? 12 : 24} vertical style={{ width: "100%" }}>
+            <Flex gap={24} vertical style={{ width: "100%" }}>
               {displayFields.map((path) => {
                 const node = findNodeByPath(state, path);
                 if (!node) {
                   console.warn(`Node not found for path: ${path.join("/")}`);
                   return null;
                 }
-                return renderField(node, path);
+                return renderField(node);
               })}
             </Flex>
           }
         </div>
       </ConfigProvider>
+      {/* 开发调试用 */}
       {showDebug && (
         <>
           <Divider />

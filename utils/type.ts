@@ -47,7 +47,7 @@ export type ReactiveEffectContext = {
   ) => void;
   setAlertTip: (path: FieldPath, content: React.ReactNode) => void;
   /** 设置字段禁用状态；若 path 指向非叶子，则批量设置其所有后代叶子 */
-  setDisable: (path: FieldPath, isDisable: boolean) => void;
+  setItemProp: (path: FieldPath, propName: string, propValue: any) => void;
 };
 
 export interface ReactiveRule {
@@ -128,35 +128,43 @@ export type FieldSchema =
       label: string;
       control: ControlType;
       validate?: ZodType;
-      options?: Array<{ label: string; value: string | number | boolean }>;
       initialVisible?: boolean;
       controlProps?: Record<string, unknown>;
       defaultValue?: FieldValue;
       helpTip?: string | JSX.Element;
-      disabled?: boolean;
-    }
-  // 对象型嵌套字段
-  | {
-      key: FieldKey;
-      isArray: true;
-      arraySchema: Omit<FieldSchema, "key">;
+      FieldDisplayComponent?: React.ElementType<{
+        state: ImmutableFormState;
+        onChange: (value: FieldValue, path: FieldPath) => void;
+      }>;
     }
   // 数组型嵌套字段
   | {
       key: FieldKey;
+      isArray: true;
+      arraySchema: Omit<FieldSchema, "key">;
+      LayoutComponent?: React.ElementType<{
+        children: React.ReactNode;
+        state: ImmutableFormState;
+      }>;
+    }
+  // 对象型嵌套字段
+  | {
+      key: FieldKey;
       isArray: false;
       childrenFields: FieldSchema[];
+      LayoutComponent?: React.ElementType<{
+        children: React.ReactNode;
+        state: ImmutableFormState;
+      }>;
     };
 
 // 存放字段运行时的响应式字段
 export interface LeafDynamicProp {
   value?: FieldValue;
   visible: boolean; // 是否显示，响应式触发
-  options: Array<{ label: string; value: string | number | boolean }>;
   alertTip?: React.ReactNode;
   errorMessage?: string;
   validation?: ZodType; // 响应式校验规则
-  disabled: boolean; // 字段组件是否被禁用
   controlProp: Record<string, any> | undefined;
 }
 
@@ -164,6 +172,17 @@ export interface LeafFieldStaticProp {
   label: string;
   toolTip: React.ReactNode;
   control: ControlType;
+  FieldDisplayComponent?: React.ElementType<{
+    state: ImmutableFormState;
+    onChange: (value: FieldValue, path: FieldPath) => void;
+  }>;
+}
+
+export interface NestedFieldStaticProp {
+  LayoutComponent?: React.ElementType<{
+    children: React.ReactNode;
+    state: ImmutableFormState;
+  }>;
 }
 
 export interface NestedFieldDynamicProp {
@@ -233,6 +252,7 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
     | {
         type: "object";
         dynamicProp: NestedFieldDynamicProp;
+        staticProp: NestedFieldStaticProp;
         children: MutableFieldNode[];
       }
     | {
@@ -241,6 +261,10 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
         staticProp: {
           /** 定义了数组单个元素的结构体 */
           schema: Omit<FieldSchema, "key">;
+          LayoutComponent?: React.ElementType<{
+            children: React.ReactNode;
+            state: ImmutableFormState;
+          }>;
         };
         children: MutableFieldNode[];
       }
@@ -249,10 +273,8 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
 export type ImmutableFormFieldProp = {
   label: string;
   value: any;
-  disabled: boolean;
   errorMessage?: string;
   visible: boolean;
-  options?: Array<{ label: string; value: string | number | boolean }>;
   alertTip?: React.ReactNode;
   toolTip?: React.ReactNode;
   control: ControlType;
@@ -263,13 +285,23 @@ export type ImmutableFormFieldProp = {
 // 导出的不可变快照类型
 export type ImmutableFormState =
   | {
+      path: FieldPath;
       key: string | number;
       type: "field";
       prop: ImmutableFormFieldProp;
+      FieldDisplayComponent?: React.ElementType<{
+        state: ImmutableFormState;
+        onChange: (value: FieldValue, path: FieldPath) => void;
+      }>;
     }
   | {
+      path: FieldPath;
       key: string | number;
       type: "nested";
       prop: Partial<Omit<ImmutableFormFieldProp, "value" | "options">>;
       children: ImmutableFormState[];
+      LayoutComponent?: React.ElementType<{
+        children: React.ReactNode;
+        state: ImmutableFormState;
+      }>;
     };

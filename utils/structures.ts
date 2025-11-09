@@ -76,6 +76,7 @@ function compileOneNode(
       dynamicProp: {},
       staticProp: {
         schema: item.arraySchema!,
+        LayoutComponent: item.LayoutComponent,
       },
       children: [],
       snapshot: {
@@ -91,6 +92,9 @@ function compileOneNode(
       path: path,
       type: "object",
       dynamicProp: {},
+      staticProp: {
+        LayoutComponent: item.LayoutComponent,
+      },
       snapshot: {
         version: currentVersion,
         lastValue: null,
@@ -106,16 +110,15 @@ function compileOneNode(
       dynamicProp: {
         value: item.defaultValue,
         visible: item.initialVisible ?? true,
-        options: item.options ?? [],
         validation:
           item.validate || z.unknown().nonoptional({ message: "请填写！" }),
-        disabled: item.disabled ?? false,
         controlProp: item.controlProps,
       },
       staticProp: {
         label: item.label || "未命名",
         toolTip: item.helpTip,
         control: item.control || "input",
+        FieldDisplayComponent: item.FieldDisplayComponent,
       },
       snapshot: {
         version: currentVersion,
@@ -180,6 +183,75 @@ const compileNodes = (
   }
 };
 
+const compileArrayNode = (
+  value: Record<string, any>,
+  schema: FieldSchema,
+  path: FieldPath,
+  rootArrayField: MutableFieldNode & { type: "array" },
+  currentVersion: number
+): MutableFieldNode => {
+  if (!("isArray" in schema)) {
+    // 返回一个field type的节点
+    const field = compileOneNode(schema, path, currentVersion);
+    if (field.type !== "field") {
+      throw new Error("schema mismatch for field node");
+    }
+    field.rootArrayField = rootArrayField;
+    field.dynamicProp.value = value;
+    return field;
+  }
+  const children: MutableFieldNode[] = [];
+  if (schema.isArray) {
+    const node = compileOneNode(
+      schema,
+      path,
+      currentVersion
+    ) as MutableFieldNode & { type: "array" };
+    node.children = children;
+    node.rootArrayField = rootArrayField;
+    // value输入可以是数组，也可以是一个对象，如果是对象，那么对象的key就是字段的key
+    Object.entries(value).forEach(([key, v]) => {
+      const childSchema: FieldSchema = {
+        ...schema.arraySchema,
+        key: key,
+      } as FieldSchema;
+      children.push(
+        compileArrayNode(
+          v,
+          childSchema,
+          [...path, key],
+          rootArrayField,
+          currentVersion
+        )
+      );
+    });
+
+    return node;
+  } else {
+    // 是object
+    const node = compileOneNode(
+      schema,
+      path,
+      currentVersion
+    ) as MutableFieldNode & { type: "object" };
+    node.children = children;
+    node.rootArrayField = rootArrayField;
+    // value输入是一个对象
+    Object.entries(value).forEach(([k, v]) => {
+      children.push(
+        compileArrayNode(
+          v,
+          schema.childrenFields!.find((x) => x.key === k)!,
+          [...path, k],
+          rootArrayField,
+          currentVersion
+        )
+      );
+    });
+    return node;
+  }
+};
+
 /** 内部对象：管理值与可见性、规则注册与触发 */
 class FormModel {
   /** 可变数据源，包括了所有生成表单所需的信息 */
@@ -211,6 +283,7 @@ class FormModel {
       type: "object",
       children: [],
       dynamicProp: {},
+      staticProp: {},
       snapshot: { version: 0, lastValue: null },
       cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
     };
@@ -330,10 +403,7 @@ class FormModel {
     );
 
     this.validatorCacheManager.rebuild();
-    console.log(this.mutableDataSource);
-
     this.plainCacheManager.rebuild();
-    this.notify();
   }
 
   setValue(
@@ -395,8 +465,6 @@ class FormModel {
       },
       this.currentVersion
     );
-
-    this.notify();
   }
 
   setValidation(path: FieldPath, validator: z.ZodType) {
@@ -459,29 +527,12 @@ class FormModel {
           throw new Error("the field is not leaf-node:" + path);
         }
         node.dynamicProp.alertTip = content;
-        this.notify();
       },
       this.currentVersion
     );
   }
 
-  testSet(path: FieldPath) {
-    const nodes = this.getNodesOnPath(path, true) || [];
-    nodes.forEach((value) => {
-      value.snapshot.version = this.currentVersion;
-    });
-  }
-
-  testGetSnapshot() {
-    const res = mutableNodeToImmutableNode(
-      this.mutableDataSource,
-      this.currentVersion
-    );
-    this.currentVersion++;
-    return res;
-  }
-
-  setDisable(path: FieldPath, isDisable: boolean) {
+  setItemsProp(path: FieldPath, propName: string, propValue: any) {
     setMutableNode(
       this.mutableDataSource,
       path,
@@ -489,7 +540,10 @@ class FormModel {
         const dfs = (n: MutableFieldNode) => {
           if (n.type === "field") {
             if (n.dynamicProp) {
-              n.dynamicProp.disabled = isDisable;
+              if (n.dynamicProp.controlProp === undefined) {
+                n.dynamicProp.controlProp = {};
+              }
+              n.dynamicProp.controlProp[propName] = propValue;
             }
             return;
           }
@@ -505,6 +559,180 @@ class FormModel {
       },
       this.currentVersion
     );
+  }
+
+  setArray(
+    path: FieldPath,
+    value: Record<string, any>,
+    option?: { shouldTriggerRule?: boolean }
+  ) {
+    const node = this.findNodeByPath(path);
+    if (!node) throw new Error("the field is not found");
+    if (node.type !== "array") {
+      throw new Error("this field is not an array:" + path);
+    }
+    const schema = node.staticProp.schema;
+    const newNode = compileArrayNode(
+      value,
+      {
+        key: path[path.length - 1],
+        isArray: true,
+        arraySchema: schema,
+      },
+      ["dummy", ...path],
+      node,
+      this.currentVersion
+    ) as MutableFieldNode & {
+      type: "array";
+    };
+
+    setMutableNode(
+      this.mutableDataSource,
+      path,
+      (node, _nodes, update) => {
+        if (node.type !== "array") {
+          throw new Error("this field is not an array:" + path);
+        }
+        node.children = newNode.children;
+      },
+      this.currentVersion
+    );
+    this.plainCacheManager.updateNode(node);
+    this.validatorCacheManager.updateNode(node);
+
+    if (option?.shouldTriggerRule) {
+      this.triggerEffectsFor(path, "children-updated");
+    }
+  }
+
+  /**
+   * 在数组字段中指定位置插入新元素
+   * @param path
+   * @param value 支持批量插入，必须传入对象以指定key
+   * @param position 插入位置，'before' 表示在目标之前插入，'after' 表示在目标之后插入
+   * @param key 目标位置的 key，如果未指定则在开头或结尾插入
+   */
+  insertIntoArray(
+    path: FieldPath,
+    value: Record<string, any>,
+    position: "before" | "after" = "before",
+    key?: FieldKey
+  ) {
+    const node = this.findNodeByPath(path);
+    if (!node) throw new Error("the field is not found");
+    if (node.type !== "array") {
+      throw new Error("this field is not an array:" + path);
+    }
+    const schema = node.staticProp.schema;
+
+    // newNode本身无意义，要的是它的children
+    const newNode = compileArrayNode(
+      value,
+      {
+        key: node.key,
+        isArray: true,
+        arraySchema: schema,
+      },
+      ["dummy", ...path],
+      node,
+      this.currentVersion
+    ) as MutableFieldNode & {
+      type: "array";
+    };
+
+    const targetIndex = node.children.findIndex((child) => child.key === key);
+
+    // 根据 position 参数决定插入位置
+    let insertIndex = position === "before" ? targetIndex : targetIndex + 1;
+    if (targetIndex === -1) {
+      insertIndex = position === "before" ? 0 : node.children.length;
+    }
+
+    setMutableNode(
+      this.mutableDataSource,
+      path,
+      (node, _nodes, update) => {
+        if (node.type !== "array") {
+          throw new Error("this field is not an array:" + path);
+        }
+        node.children.splice(insertIndex, 0, ...newNode.children);
+      },
+      this.currentVersion
+    );
+    this.plainCacheManager.updateNode(node);
+    this.validatorCacheManager.updateNode(node);
+  }
+
+  /**
+   * 设置或删除数组字段中的某一项元素
+   * @param path 数组节点的路径
+   * @param key 要设置或删除的元素的 key
+   * @param value 元素的值；如果为 undefined，则删除该元素
+   */
+  setItemOfArray(path: FieldPath, key: FieldKey, value: any) {
+    const node = this.findNodeByPath(path);
+    if (!node) throw new Error("the field is not found");
+    if (node.type !== "array") {
+      throw new Error("this field is not an array:" + path);
+    }
+
+    if (value === undefined) {
+      // 删除元素
+      const targetIndex = node.children.findIndex((child) => child.key === key);
+      if (targetIndex === -1) {
+        throw new Error("the target key is not found in array: " + key);
+      }
+
+      setMutableNode(
+        this.mutableDataSource,
+        path,
+        (node, _nodes, update) => {
+          if (node.type !== "array") {
+            throw new Error("this field is not an array:" + path);
+          }
+          node.children.splice(targetIndex, 1);
+        },
+        this.currentVersion
+      );
+    } else {
+      // 设置或更新元素
+      const schema = node.staticProp.schema;
+      const targetIndex = node.children.findIndex((child) => child.key === key);
+
+      if (targetIndex === -1) {
+        this.insertIntoArray(path, { [key]: value }, "after");
+      } else {
+        // key 存在，更新该元素
+        const newNode = compileArrayNode(
+          { [key]: value },
+          {
+            key: node.key,
+            isArray: true,
+            arraySchema: schema,
+          },
+          ["dummy", ...path],
+          node,
+          this.currentVersion
+        ) as MutableFieldNode & {
+          type: "array";
+        };
+
+        setMutableNode(
+          this.mutableDataSource,
+          path,
+          (node, _nodes, update) => {
+            if (node.type !== "array") {
+              throw new Error("this field is not an array:" + path);
+            }
+            node.children.splice(targetIndex, 1, ...newNode.children);
+          },
+          this.currentVersion
+        );
+      }
+    }
+
+    this.plainCacheManager.updateNode(node);
+    this.validatorCacheManager.updateNode(node);
   }
 
   getSnapshot(): ImmutableFormState {
@@ -534,7 +762,7 @@ class FormModel {
         setValidation: () => void 0,
         setArray: () => void 0,
         setAlertTip: () => void 0,
-        setDisable: () => void 0,
+        setItemProp: () => void 0,
       },
       "dependencies-collecting"
     );
@@ -594,7 +822,8 @@ class FormModel {
           },
           // this.updateChildren(path, chilren, option),
           setAlertTip: (path, content) => this.setAlertTip(path, content),
-          setDisable: (path, isDisable) => this.setDisable(path, isDisable),
+          setItemProp: (path, propName, propValue) =>
+            this.setItemsProp(path, propName, propValue),
         },
         cause,
         info
@@ -612,109 +841,6 @@ class FormModel {
     const list = node.effect;
     if (!list) return;
     this.runEffects(list, cause, { changedPath: depFieldPath });
-  }
-
-  setArray(
-    path: FieldPath,
-    value: Record<string, any>,
-    option?: { shouldTriggerRule?: boolean }
-  ) {
-    const dfs = (
-      value: Record<string, any>,
-      schema: FieldSchema,
-      path: FieldPath,
-      rootArrayField: MutableFieldNode & { type: "array" }
-    ): MutableFieldNode => {
-      if (!("isArray" in schema)) {
-        // 返回一个field type的节点
-        const field = compileOneNode(schema, path, this.currentVersion);
-        if (field.type !== "field") {
-          throw new Error("schema mismatch for field node");
-        }
-        field.rootArrayField = rootArrayField;
-        field.dynamicProp.value = value;
-        return field;
-      }
-      const children: MutableFieldNode[] = [];
-      if (schema.isArray) {
-        const node = compileOneNode(
-          schema,
-          path,
-          this.currentVersion
-        ) as MutableFieldNode & { type: "array" };
-        node.children = children;
-        node.rootArrayField = rootArrayField;
-        // value输入可以是数组，也可以是一个对象，如果是对象，那么对象的key就是字段的key
-        Object.entries(value).forEach(([k, v]) => {
-          const childSchema: FieldSchema = {
-            ...schema.arraySchema,
-            key: k,
-          } as FieldSchema;
-          children.push(dfs(v, childSchema, [...path, k], rootArrayField));
-        });
-
-        return node;
-      } else {
-        // 是object
-        const node = compileOneNode(
-          schema,
-          path,
-          this.currentVersion
-        ) as MutableFieldNode & { type: "object" };
-        node.children = children;
-        node.rootArrayField = rootArrayField;
-        // value输入是一个对象
-        Object.entries(value).forEach(([k, v]) => {
-          children.push(
-            dfs(
-              v,
-              schema.childrenFields!.find((x) => x.key === k)!,
-              [...path, k],
-              rootArrayField
-            )
-          );
-        });
-        return node;
-      }
-    };
-    const node = this.findNodeByPath(path);
-    if (!node) throw new Error("the field is not found");
-    if (node.type !== "array") {
-      throw new Error("this field is not an array:" + path);
-    }
-    const schema = node.staticProp.schema;
-    const newNode = dfs(
-      value,
-      {
-        key: path[path.length - 1],
-        isArray: true,
-        arraySchema: schema,
-      },
-      ["dummy", ...path],
-      node
-    ) as MutableFieldNode & {
-      type: "array";
-    };
-
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node, _nodes, update) => {
-        if (node.type !== "array") {
-          throw new Error("this field is not an array:" + path);
-        }
-        node.children = newNode.children;
-      },
-      this.currentVersion
-    );
-    this.plainCacheManager.updateNode(node);
-    this.validatorCacheManager.updateNode(node);
-
-    if (option?.shouldTriggerRule) {
-      this.triggerEffectsFor(path, "children-updated");
-    }
-
-    this.notify();
   }
 
   /**

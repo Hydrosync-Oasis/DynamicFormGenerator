@@ -16,10 +16,12 @@ export default function DynamicExamplePage() {
           key: "userType",
           label: "用户类型",
           control: "radio",
-          options: [
-            { label: "个人", value: "person" },
-            { label: "企业", value: "company" },
-          ],
+          controlProps: {
+            options: [
+              { label: "个人", value: "person" },
+              { label: "企业", value: "company" },
+            ],
+          },
           defaultValue: "person",
           validate: z.enum(["person", "company"], {
             message: "请选择用户类型",
@@ -110,7 +112,7 @@ export default function DynamicExamplePage() {
     model.initial();
 
     return () => stop();
-  }, [model]);
+  }, []);
 
   // 4) 展示字段顺序
   const displayFields: FieldPath[] = useMemo(
@@ -135,7 +137,6 @@ export default function DynamicExamplePage() {
       <Card title="动态示例：条件显示 + 跨字段校验" bordered>
         <Generator
           model={model}
-          size="normal"
           displayFields={displayFields}
           displayOption={{ labelSpan: 6, fieldSpan: 18, showDebug: true }}
         />

@@ -11,14 +11,13 @@ export function mutableNodeToImmutableNode(
     // 准备好返回的叶子结点
     const leafNode: ImmutableFormState = {
       key: sourceNode.key,
+      path: sourceNode.path,
       type: "field",
       prop: {
         label: sourceNode.staticProp.label!,
         visible: sourceNode.dynamicProp.visible,
         value: sourceNode.dynamicProp.value || null,
-        disabled: sourceNode.dynamicProp.disabled || false,
         errorMessage: sourceNode.dynamicProp.errorMessage,
-        options: sourceNode.dynamicProp.options,
         alertTip: sourceNode.dynamicProp.alertTip,
         toolTip: sourceNode.staticProp.toolTip,
         control: sourceNode.staticProp.control,
@@ -28,6 +27,7 @@ export function mutableNodeToImmutableNode(
             ? false
             : !sourceNode.dynamicProp.validation.isOptional(),
       },
+      FieldDisplayComponent: sourceNode.staticProp.FieldDisplayComponent,
     };
 
     // 如果没有变化，使用以前的节点
@@ -42,11 +42,11 @@ export function mutableNodeToImmutableNode(
   // 是嵌套节点，需要递归
   const nestedField: ImmutableFormState = {
     key: sourceNode.key,
+    path: sourceNode.path,
     type: "nested",
-    prop: {
-      // label: sourceNode.?.label,
-    },
+    prop: {},
     children: [],
+    LayoutComponent: sourceNode.staticProp.LayoutComponent,
   };
 
   // 如果也是没有发生改变
