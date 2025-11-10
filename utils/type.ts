@@ -207,12 +207,17 @@ type MutableFieldNodeBaseType = {
   effect?: Set<ReactiveEffect>;
 
   /** 为了生成不可变快照的辅助属性，与其他字段不同 */
-  snapshot: {
-    /** 用于识别哪些节点发生了变化，用于判断是否应该浅拷贝 */
-    version: number;
-    /** 存储节点的引用，没有发生变化的节点直接浅拷贝 */
-    lastValue: ImmutableFormState | null;
-  };
+  snapshot:
+    | {
+        /** 节点是最新的 */
+        dirty: false;
+        /** 存储节点的引用，没有发生变化的节点直接浅拷贝 */
+        lastValue: ImmutableFormState | null;
+      }
+    | {
+        /** 节点发生了变化，需要重新生成不可变快照 */
+        dirty: true;
+      };
   cache: NodeCache;
 };
 

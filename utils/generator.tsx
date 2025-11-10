@@ -24,6 +24,7 @@ interface DynamicFormHook {
   getFieldValue: (path: FieldPath) => any;
   setFieldValue: (path: FieldPath, value: FieldValue) => void;
   setFieldsValue: (value: any) => void;
+  resetFields: (path?: FieldPath) => void;
   validateField: (path: FieldPath) => Promise<any>;
   validateFields: (paths: FieldPath[]) => Promise<any>;
   validateAllFields: () => Promise<any>;
@@ -50,6 +51,9 @@ const useDynamicForm = (model: FormModel) => {
       },
       setFieldsValue: (values: any) => {
         model.setValues([], values, undefined, true);
+      },
+      resetFields: (path?: FieldPath) => {
+        model.resetFields(path);
       },
       /**
        * 校验指定字段，无论是否显示都校验，使用多步骤动态表单优先使用这个函数

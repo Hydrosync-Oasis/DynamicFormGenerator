@@ -63,11 +63,7 @@ export function getNodesOnPath(
   return nodes;
 }
 
-function compileOneNode(
-  item: FieldSchema,
-  path: FieldPath,
-  currentVersion: number
-): MutableFieldNode {
+function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
   if ("isArray" in item && item.isArray) {
     return {
       key: item.key,
@@ -80,8 +76,7 @@ function compileOneNode(
       },
       children: [],
       snapshot: {
-        version: currentVersion,
-        lastValue: null,
+        dirty: true,
       },
       effect: new Set(),
       cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
@@ -96,8 +91,7 @@ function compileOneNode(
         LayoutComponent: item.LayoutComponent,
       },
       snapshot: {
-        version: currentVersion,
-        lastValue: null,
+        dirty: true,
       },
       children: [],
       cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
@@ -121,8 +115,7 @@ function compileOneNode(
         FieldDisplayComponent: item.FieldDisplayComponent,
       },
       snapshot: {
-        version: currentVersion,
-        lastValue: null,
+        dirty: true,
       },
       effect: new Set(),
       cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
@@ -152,11 +145,10 @@ const compileNodes = (
 
   if (schema.isArray === false) {
     for (let schemaItem of schema.childrenFields || []) {
-      const newNode: MutableFieldNode = compileOneNode(
-        schemaItem,
-        [...seenPath, schemaItem.key],
-        currentVersion
-      );
+      const newNode: MutableFieldNode = compileOneNode(schemaItem, [
+        ...seenPath,
+        schemaItem.key,
+      ]);
 
       if (newNode.type !== "field" && "isArray" in schemaItem) {
         compileNodes(
@@ -174,11 +166,10 @@ const compileNodes = (
     }
   } else {
     // 数组型字段是动态的，和数据有关，在这里直接结束，不能继续递归
-    const newNode: MutableFieldNode = compileOneNode(
-      schema,
-      [...seenPath, schema.key],
-      currentVersion
-    );
+    const newNode: MutableFieldNode = compileOneNode(schema, [
+      ...seenPath,
+      schema.key,
+    ]);
     return newNode;
   }
 };
@@ -192,7 +183,7 @@ const compileArrayNode = (
 ): MutableFieldNode => {
   if (!("isArray" in schema)) {
     // 返回一个field type的节点
-    const field = compileOneNode(schema, path, currentVersion);
+    const field = compileOneNode(schema, path);
     if (field.type !== "field") {
       throw new Error("schema mismatch for field node");
     }
@@ -202,11 +193,9 @@ const compileArrayNode = (
   }
   const children: MutableFieldNode[] = [];
   if (schema.isArray) {
-    const node = compileOneNode(
-      schema,
-      path,
-      currentVersion
-    ) as MutableFieldNode & { type: "array" };
+    const node = compileOneNode(schema, path) as MutableFieldNode & {
+      type: "array";
+    };
     node.children = children;
     node.rootArrayField = rootArrayField;
     // value输入可以是数组，也可以是一个对象，如果是对象，那么对象的key就是字段的key
@@ -229,11 +218,9 @@ const compileArrayNode = (
     return node;
   } else {
     // 是object
-    const node = compileOneNode(
-      schema,
-      path,
-      currentVersion
-    ) as MutableFieldNode & { type: "object" };
+    const node = compileOneNode(schema, path) as MutableFieldNode & {
+      type: "object";
+    };
     node.children = children;
     node.rootArrayField = rootArrayField;
     // value输入是一个对象
@@ -284,7 +271,7 @@ class FormModel {
       children: [],
       dynamicProp: {},
       staticProp: {},
-      snapshot: { version: 0, lastValue: null },
+      snapshot: { dirty: true },
       cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
     };
 
@@ -393,14 +380,9 @@ class FormModel {
       }
     };
 
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node, _path, update) => {
-        dfs(node, update);
-      },
-      this.currentVersion
-    );
+    setMutableNode(this.mutableDataSource, path, (node, _path, update) => {
+      dfs(node, update);
+    });
 
     this.validatorCacheManager.rebuild();
     this.plainCacheManager.rebuild();
@@ -419,57 +401,50 @@ class FormModel {
     },
     shouldNotify: boolean = false
   ) {
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node, nodes) => {
-        const invokeOnChange = option?.invokeOnChange;
-        const invokeEffect = option?.invokeEffect ?? true;
+    setMutableNode(this.mutableDataSource, path, (node, nodes) => {
+      const invokeOnChange = option?.invokeOnChange;
+      const invokeEffect = option?.invokeEffect ?? true;
 
-        if (node.type === "object") {
-          throw new Error("the field is not leaf-node:" + path);
-        }
-        if (!node.dynamicProp) {
-          return;
-        }
+      if (node.type === "object") {
+        throw new Error("the field is not leaf-node:" + path);
+      }
+      if (!node.dynamicProp) {
+        return;
+      }
 
-        // 判断是否是在数组嵌套字段内部
-        if (nodes.some((x) => x.type === "array")) {
-          if (node.type === "array") {
-            throw new Error(
-              "please use updateChildren to set array field value"
-            );
-          } else {
-            node.dynamicProp.value = value;
-            // 值变更后，标记缓存
-            this.plainCacheManager.updateNode(node);
-
-            // 值变化后，触发依赖该字段的规则
-            const root = node.rootArrayField;
-            if (root && invokeEffect) {
-              this.runEffects(
-                root.effect || new Set<ReactiveEffect>(),
-                "value-changed",
-                { changedPath: path }
-              );
-            }
-          }
+      // 判断是否是在数组嵌套字段内部
+      if (nodes.some((x) => x.type === "array")) {
+        if (node.type === "array") {
+          throw new Error("please use updateChildren to set array field value");
         } else {
-          (node as MutableFieldNode & { type: "field" }).dynamicProp.value =
-            value;
+          node.dynamicProp.value = value;
           // 值变更后，标记缓存
           this.plainCacheManager.updateNode(node);
+
           // 值变化后，触发依赖该字段的规则
-          if (invokeEffect) {
-            this.triggerEffectsFor(path, "value-changed");
+          const root = node.rootArrayField;
+          if (root && invokeEffect) {
+            this.runEffects(
+              root.effect || new Set<ReactiveEffect>(),
+              "value-changed",
+              { changedPath: path }
+            );
           }
         }
-        if (invokeOnChange) {
-          this.onChange?.(path, value);
+      } else {
+        (node as MutableFieldNode & { type: "field" }).dynamicProp.value =
+          value;
+        // 值变更后，标记缓存
+        this.plainCacheManager.updateNode(node);
+        // 值变化后，触发依赖该字段的规则
+        if (invokeEffect) {
+          this.triggerEffectsFor(path, "value-changed");
         }
-      },
-      this.currentVersion
-    );
+      }
+      if (invokeOnChange) {
+        this.onChange?.(path, value);
+      }
+    });
     if (shouldNotify) {
       this.notify();
     }
@@ -487,75 +462,70 @@ class FormModel {
     const triggerRules = option?.invokeEffect ?? true;
     const currentVersion = this.currentVersion;
 
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node, _nodes, update) => {
-        const dfs = (
-          node: MutableFieldNode,
-          value:
-            | string
-            | boolean
-            | number
-            | Record<string, any>
-            | undefined
-            | null
-        ): boolean => {
-          if (node.type === "field" && value !== undefined) {
-            node.dynamicProp.value = value;
-            update(node);
-            this.plainCacheManager.updateNode(node);
-            if (triggerRules) {
-              this.triggerEffectsFor(node.path.slice(1), "value-changed");
-            }
-            if (node.key === "TCS_OPTIONS") {
-              console.log(node);
-              debugger;
-            }
-            return true;
+    setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+      const dfs = (
+        node: MutableFieldNode,
+        value:
+          | string
+          | boolean
+          | number
+          | Record<string, any>
+          | undefined
+          | null
+      ): boolean => {
+        if (node.type === "field" && value !== undefined) {
+          node.dynamicProp.value = value;
+          update(node);
+          this.plainCacheManager.updateNode(node);
+          if (triggerRules) {
+            this.triggerEffectsFor(node.path.slice(1), "value-changed");
           }
-          let updated = false;
-          if (node.type === "object") {
-            node.children.forEach((n) => {
-              if (typeof value === "object" && value !== null) {
-                if (dfs(n, value[n.key])) {
-                  updated = true;
-                }
+          if (node.key === "TCS_OPTIONS") {
+            console.log(node);
+            debugger;
+          }
+          return true;
+        }
+        let updated = false;
+        if (node.type === "object") {
+          node.children.forEach((n) => {
+            if (typeof value === "object" && value !== null) {
+              if (dfs(n, value[n.key])) {
+                updated = true;
               }
-            });
-          } else if (node.type === "array") {
-            // 数组和对象均可
-            if (typeof value !== "object" || value === null) {
-              return false;
             }
-            const rootSchema: FieldSchema = {
-              key: node.key,
-              isArray: true,
-              arraySchema: node.staticProp.schema,
-            };
-            const res = compileArrayNode(
-              value,
-              rootSchema,
-              node.path,
-              node,
-              this.currentVersion
-            );
+          });
+        } else if (node.type === "array") {
+          // 数组和对象均可
+          if (typeof value !== "object" || value === null) {
+            return false;
+          }
+          const rootSchema: FieldSchema = {
+            key: node.key,
+            isArray: true,
+            arraySchema: node.staticProp.schema,
+          };
+          const res = compileArrayNode(
+            value,
+            rootSchema,
+            node.path,
+            node,
+            this.currentVersion
+          );
 
-            if (res.type === "array") {
-              node.children = res.children;
-              updated = true;
-            }
+          if (res.type === "array") {
+            node.children = res.children;
+            updated = true;
           }
-          if (updated) {
-            this.plainCacheManager.updateNode(node);
-            update(node);
-          }
-          return updated;
-        };
-        dfs(node, values);
-      },
-      this.currentVersion
-    );
+        }
+        if (updated) {
+          this.plainCacheManager.updateNode(node);
+          update(node);
+        }
+        return updated;
+      };
+      dfs(node, values);
+    });
 
     if ((option?.invokeOnChange ?? true) && this.onChange) {
       this.plainCacheManager.rebuild();
@@ -595,18 +565,13 @@ class FormModel {
 
     if (oldIsOptional !== newIsOptional) {
       // 如果 isOptional 状态改变，使用 setMutableNode 通知变更
-      setMutableNode(
-        this.mutableDataSource,
-        path,
-        (node, _nodes, update) => {
-          if (node.type === "field") {
-            node.dynamicProp.validation = validator;
-            this.validatorCacheManager.updateNode(node);
-            update(node);
-          }
-        },
-        this.currentVersion
-      );
+      setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+        if (node.type === "field") {
+          node.dynamicProp.validation = validator;
+          this.validatorCacheManager.updateNode(node);
+          update(node);
+        }
+      });
       if (shouldNotify) {
         this.notify();
       }
@@ -639,17 +604,12 @@ class FormModel {
     content: React.ReactNode,
     shouldNotify: boolean = false
   ) {
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node) => {
-        if (node.type !== "field") {
-          throw new Error("the field is not leaf-node:" + path);
-        }
-        node.dynamicProp.alertTip = content;
-      },
-      this.currentVersion
-    );
+    setMutableNode(this.mutableDataSource, path, (node) => {
+      if (node.type !== "field") {
+        throw new Error("the field is not leaf-node:" + path);
+      }
+      node.dynamicProp.alertTip = content;
+    });
     if (shouldNotify) {
       this.notify();
     }
@@ -661,32 +621,27 @@ class FormModel {
     propValue: any,
     shouldNotify: boolean = false
   ) {
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node, _nodes, update) => {
-        const dfs = (n: MutableFieldNode) => {
-          if (n.type === "field") {
-            if (n.dynamicProp) {
-              if (n.dynamicProp.controlProp === undefined) {
-                n.dynamicProp.controlProp = {};
-              }
-              n.dynamicProp.controlProp[propName] = propValue;
+    setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+      const dfs = (n: MutableFieldNode) => {
+        if (n.type === "field") {
+          if (n.dynamicProp) {
+            if (n.dynamicProp.controlProp === undefined) {
+              n.dynamicProp.controlProp = {};
             }
-            return;
+            n.dynamicProp.controlProp[propName] = propValue;
           }
-          if (n.children && n.children.length > 0) {
-            n.children.forEach((c) => {
-              dfs(c);
-              update(c);
-            });
-          }
-        };
+          return;
+        }
+        if (n.children && n.children.length > 0) {
+          n.children.forEach((c) => {
+            dfs(c);
+            update(c);
+          });
+        }
+      };
 
-        dfs(node);
-      },
-      this.currentVersion
-    );
+      dfs(node);
+    });
     if (shouldNotify) {
       this.notify();
     }
@@ -718,17 +673,12 @@ class FormModel {
       type: "array";
     };
 
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node, _nodes, update) => {
-        if (node.type !== "array") {
-          throw new Error("this field is not an array:" + path);
-        }
-        node.children = newNode.children;
-      },
-      this.currentVersion
-    );
+    setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+      if (node.type !== "array") {
+        throw new Error("this field is not an array:" + path);
+      }
+      node.children = newNode.children;
+    });
     this.plainCacheManager.updateNode(node);
     this.validatorCacheManager.updateNode(node);
 
@@ -785,17 +735,12 @@ class FormModel {
       insertIndex = position === "before" ? 0 : node.children.length;
     }
 
-    setMutableNode(
-      this.mutableDataSource,
-      path,
-      (node, _nodes, update) => {
-        if (node.type !== "array") {
-          throw new Error("this field is not an array:" + path);
-        }
-        node.children.splice(insertIndex, 0, ...newNode.children);
-      },
-      this.currentVersion
-    );
+    setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+      if (node.type !== "array") {
+        throw new Error("this field is not an array:" + path);
+      }
+      node.children.splice(insertIndex, 0, ...newNode.children);
+    });
     this.plainCacheManager.updateNode(node);
     this.validatorCacheManager.updateNode(node);
     if (shouldNotify) {
@@ -828,17 +773,12 @@ class FormModel {
         throw new Error("the target key is not found in array: " + key);
       }
 
-      setMutableNode(
-        this.mutableDataSource,
-        path,
-        (node, _nodes, update) => {
-          if (node.type !== "array") {
-            throw new Error("this field is not an array:" + path);
-          }
-          node.children.splice(targetIndex, 1);
-        },
-        this.currentVersion
-      );
+      setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+        if (node.type !== "array") {
+          throw new Error("this field is not an array:" + path);
+        }
+        node.children.splice(targetIndex, 1);
+      });
     } else {
       // 设置或更新元素
       const schema = node.staticProp.schema;
@@ -862,17 +802,12 @@ class FormModel {
           type: "array";
         };
 
-        setMutableNode(
-          this.mutableDataSource,
-          path,
-          (node, _nodes, update) => {
-            if (node.type !== "array") {
-              throw new Error("this field is not an array:" + path);
-            }
-            node.children.splice(targetIndex, 1, ...newNode.children);
-          },
-          this.currentVersion
-        );
+        setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+          if (node.type !== "array") {
+            throw new Error("this field is not an array:" + path);
+          }
+          node.children.splice(targetIndex, 1, ...newNode.children);
+        });
       }
     }
 
@@ -885,10 +820,7 @@ class FormModel {
   }
 
   getSnapshot(): ImmutableFormState {
-    const res = mutableNodeToImmutableNode(
-      this.mutableDataSource,
-      this.currentVersion
-    );
+    const res = mutableNodeToImmutableNode(this.mutableDataSource);
     // this.currentVersion++;
     return res;
   }
@@ -1063,74 +995,63 @@ class FormModel {
     this.validatorCacheManager.rebuild();
     let finalError: ZodError | undefined = undefined;
     if (!enableEnhancer) {
-      setMutableNode(
-        this.mutableDataSource,
-        path,
-        (node, _nodes, update) => {
-          if (node.type === "field") {
-            // 单字段校验
-            const res = node.dynamicProp.validation?.safeParse(
-              node.dynamicProp.value
-            );
-            if (res?.success) {
-              node.dynamicProp.errorMessage = undefined;
-            } else {
-              // 只保留第一个错误信息
-              node.dynamicProp.errorMessage = res?.error.issues[0].message;
-              finalError = res?.error;
-            }
+      setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+        if (node.type === "field") {
+          // 单字段校验
+          const res = node.dynamicProp.validation?.safeParse(
+            node.dynamicProp.value
+          );
+          if (res?.success) {
+            node.dynamicProp.errorMessage = undefined;
           } else {
-            const validation = node.cache.validator;
-            const plainObj = node.cache.plainObj;
-            if (
-              validation.type === "hasValue" &&
-              plainObj.type === "hasValue"
-            ) {
-              // 校验全对象
-              const value = plainObj.objectOnly;
-              const validator = validation.validator;
-              const res = validator.safeParse(value);
-
-              const errorIssues = res.error?.issues;
-              const errorInfo = errorIssues;
-
-              const dfs = (node: MutableFieldNode) => {
-                if (node.type === "field") {
-                  const info = errorInfo?.find((e) => {
-                    return isSamePath(
-                      path.concat(e.path as string[]),
-                      node.path.slice(1)
-                    );
-                  });
-
-                  if (!info) {
-                    node.dynamicProp.errorMessage = undefined;
-                  } else {
-                    node.dynamicProp.errorMessage = info.message;
-                  }
-                  update(node);
-                  return;
-                }
-
-                for (let i of node.children) {
-                  dfs(i);
-                  update(i);
-                }
-              };
-              dfs(node);
-              if (!res.success && errorInfo) {
-                finalError = new ZodError(errorInfo);
-              }
-            } else if (
-              validation.type === "dirty" ||
-              plainObj.type === "dirty"
-            ) {
-              throw new Error("dirty value");
-            }
+            // 只保留第一个错误信息
+            node.dynamicProp.errorMessage = res?.error.issues[0].message;
+            finalError = res?.error;
           }
-        },
-        this.currentVersion
-      );
+        } else {
+          const validation = node.cache.validator;
+          const plainObj = node.cache.plainObj;
+          if (validation.type === "hasValue" && plainObj.type === "hasValue") {
+            // 校验全对象
+            const value = plainObj.objectOnly;
+            const validator = validation.validator;
+            const res = validator.safeParse(value);
+
+            const errorIssues = res.error?.issues;
+            const errorInfo = errorIssues;
+
+            const dfs = (node: MutableFieldNode) => {
+              if (node.type === "field") {
+                const info = errorInfo?.find((e) => {
+                  return isSamePath(
+                    path.concat(e.path as string[]),
+                    node.path.slice(1)
+                  );
+                });
+
+                if (!info) {
+                  node.dynamicProp.errorMessage = undefined;
+                } else {
+                  node.dynamicProp.errorMessage = info.message;
+                }
+                update(node);
+                return;
+              }
+
+              for (let i of node.children) {
+                dfs(i);
+                update(i);
+              }
+            };
+            dfs(node);
+            if (!res.success && errorInfo) {
+              finalError = new ZodError(errorInfo);
+            }
+          } else if (validation.type === "dirty" || plainObj.type === "dirty") {
+            throw new Error("dirty value");
+          }
+        }
+      });
     } else {
       // 从根部校验
       const value = this.mutableDataSource.cache.plainObj;
@@ -1144,36 +1065,31 @@ class FormModel {
               isChildNode(e.path as string[], path)
             );
 
-        setMutableNode(
-          this.mutableDataSource,
-          path,
-          (node, _nodes, mutate) => {
-            const dfs = (node: MutableFieldNode): boolean => {
-              if (node.type === "field") {
-                if (isChildNode(node.path.slice(1), path)) {
-                  const msg = info?.find((x) => {
-                    return isSamePath(x.path as string[], path);
-                  })?.message;
-                  node.dynamicProp.errorMessage = msg;
-                  mutate(node);
-                  return true;
-                }
-                return false;
+        setMutableNode(this.mutableDataSource, path, (node, _nodes, mutate) => {
+          const dfs = (node: MutableFieldNode): boolean => {
+            if (node.type === "field") {
+              if (isChildNode(node.path.slice(1), path)) {
+                const msg = info?.find((x) => {
+                  return isSamePath(x.path as string[], path);
+                })?.message;
+                node.dynamicProp.errorMessage = msg;
+                mutate(node);
+                return true;
               }
+              return false;
+            }
 
-              let hasMutate = false;
-              for (let i of node.children) {
-                if (dfs(i)) {
-                  mutate(i);
-                  hasMutate = true;
-                }
+            let hasMutate = false;
+            for (let i of node.children) {
+              if (dfs(i)) {
+                mutate(i);
+                hasMutate = true;
               }
-              return hasMutate;
-            };
-            dfs(node);
-          },
-          this.currentVersion
-        );
+            }
+            return hasMutate;
+          };
+          dfs(node);
+        });
         if (!res.success && info && info.length > 0) {
           finalError = new ZodError(info);
         }
@@ -1243,8 +1159,7 @@ class FormModel {
         };
 
         resetNode(node);
-      },
-      this.currentVersion
+      }
     );
 
     // 重建缓存

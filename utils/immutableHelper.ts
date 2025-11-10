@@ -2,12 +2,17 @@ import { MutableFieldNode, FieldPath, getNodesOnPath } from "./structures";
 import { ImmutableFormState } from "./type";
 
 export function mutableNodeToImmutableNode(
-  sourceNode: MutableFieldNode,
-  currentVersion: number
+  sourceNode: MutableFieldNode
 ): ImmutableFormState {
   const snapshotInfo = sourceNode.snapshot;
 
   if (sourceNode.type === "field") {
+    // 如果没有变化，使用以前的节点
+    if (snapshotInfo.dirty === false && snapshotInfo.lastValue) {
+      return snapshotInfo.lastValue;
+    }
+
+    // 如果发生了变化，或者是第一次来，都需要生成并赋值
     // 准备好返回的叶子结点
     const leafNode: ImmutableFormState = {
       key: sourceNode.key,
@@ -30,14 +35,16 @@ export function mutableNodeToImmutableNode(
       FieldDisplayComponent: sourceNode.staticProp.FieldDisplayComponent,
     };
 
-    // 如果没有变化，使用以前的节点
-    if (snapshotInfo.version < currentVersion && snapshotInfo.lastValue) {
-      return snapshotInfo.lastValue;
-    }
-    // 如果发生了变化，或者是第一次来，都需要生成并赋值
-    snapshotInfo.lastValue = leafNode;
-    snapshotInfo.version--;
+    sourceNode.snapshot = {
+      dirty: false,
+      lastValue: leafNode,
+    };
     return leafNode;
+  }
+
+  // 如果也是没有发生改变
+  if (snapshotInfo.dirty === false && snapshotInfo.lastValue) {
+    return snapshotInfo.lastValue;
   }
 
   // 是嵌套节点，需要递归
@@ -49,20 +56,16 @@ export function mutableNodeToImmutableNode(
     children: [],
     LayoutComponent: sourceNode.staticProp.LayoutComponent,
   };
-
-  // 如果也是没有发生改变
-  if (snapshotInfo.version < currentVersion && snapshotInfo.lastValue) {
-    return snapshotInfo.lastValue;
-  }
   // 如果是第一次遍历到这个嵌套节点，或确实需要发生更新
   for (let i in sourceNode.children) {
     nestedField.children.push(
-      mutableNodeToImmutableNode(sourceNode.children[i], currentVersion)
+      mutableNodeToImmutableNode(sourceNode.children[i])
     );
   }
-
-  snapshotInfo.lastValue = nestedField;
-  snapshotInfo.version--;
+  sourceNode.snapshot = {
+    dirty: false,
+    lastValue: nestedField,
+  };
 
   return nestedField;
 }
@@ -75,8 +78,7 @@ export function setMutableNode(
     nodesOnPath: MutableFieldNode[],
     /**用于标记此处发生改变的函数，会对这里生成全新的不可变对象 */
     mutate: (node: MutableFieldNode) => void
-  ) => void,
-  currentVersion: number
+  ) => void
 ) {
   const nodes = getNodesOnPath(mutableModel, path, true);
 
@@ -84,10 +86,10 @@ export function setMutableNode(
     throw new Error("this path is not found.");
   }
   nodes?.forEach((n) => {
-    n.snapshot.version = currentVersion;
+    n.snapshot.dirty = true;
   });
 
   setter(nodes[nodes.length - 1], nodes, (node) => {
-    node.snapshot.version = currentVersion;
+    node.snapshot.dirty = true;
   });
 }
