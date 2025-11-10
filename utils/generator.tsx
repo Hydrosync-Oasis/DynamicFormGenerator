@@ -2,30 +2,19 @@ import {
   ConfigProvider,
   Divider,
   Alert,
-  Card,
   Col,
   Radio,
   Row,
-  Space,
   Input,
   Select,
   Tooltip,
   Flex,
 } from "antd";
-import React, {
-  useState,
-  useEffect,
-  ComponentType,
-  useSyncExternalStore,
-  useMemo,
-  useCallback,
-} from "react";
-import { FieldPath, FieldSchema, FieldValue, FormModel } from "./structures";
-import { ZodType } from "zod";
+import React, { useSyncExternalStore, useMemo, useCallback } from "react";
+import { FieldPath, FieldValue, FormModel } from "./structures";
 import { InfoCircleOutlined } from "@ant-design/icons";
-import { ControlType, ImmutableFormState } from "./type";
+import { ImmutableFormState } from "./type";
 import { findNodeByPath } from "./helper";
-import debounce from "lodash/debounce";
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
 
@@ -57,32 +46,10 @@ const useDynamicForm = (model: FormModel) => {
         return model.get(path, "value");
       },
       setFieldValue: (path: FieldPath, value: FieldValue) => {
-        model.setValue(path, value);
+        model.setValue(path, value, { invokeOnChange: true }, true);
       },
       setFieldsValue: (values: any) => {
-        // 递归设置多个字段的值
-        const setNestedValues = (
-          obj: Record<string, any>,
-          currentPath: FieldPath = []
-        ) => {
-          Object.entries(obj).forEach(([key, value]) => {
-            const path = [...currentPath, key];
-            if (
-              typeof value === "object" &&
-              value !== null &&
-              !Array.isArray(value)
-            ) {
-              setNestedValues(value, path);
-            } else {
-              try {
-                model.setValue(path, value);
-              } catch {
-                // 说明有多余字段
-              }
-            }
-          });
-        };
-        setNestedValues(values);
+        model.setValues([], values, undefined, true);
       },
       /**
        * 校验指定字段，无论是否显示都校验，使用多步骤动态表单优先使用这个函数
@@ -141,7 +108,9 @@ export const DefaultFieldDisplay = React.memo(
 
     let FormFieldRenderer: React.ReactElement | undefined = undefined;
 
-    if (typeof Control !== "string" && Control !== undefined) {
+    if (Control === undefined) {
+      return null;
+    } else if (typeof Control !== "string") {
       FormFieldRenderer = (
         <Control
           id={path.join("/")}
@@ -165,6 +134,7 @@ export const DefaultFieldDisplay = React.memo(
         <Select
           id={path.join("/")}
           value={value}
+          className="!w-full"
           status={errorMessage && "error"}
           {...controlProps}
           onChange={(value) => onChange(value, path)}
@@ -246,7 +216,14 @@ export const DefaultFieldDisplay = React.memo(
                   <span>{label}</span>
                   <span>
                     {isRequired && (
-                      <span style={{ color: "#ff4d4f", marginRight: 4 }}>
+                      <span
+                        style={{
+                          color: "#ff4d4f",
+                          marginRight: 4,
+                          fontSize: 14,
+                          fontFamily: "SimSun,sans-serif",
+                        }}
+                      >
                         *
                       </span>
                     )}
@@ -286,6 +263,53 @@ export const DefaultFieldDisplay = React.memo(
   }
 );
 
+DefaultFieldDisplay.displayName = "DefaultFieldDisplay";
+
+/**
+ * HOC - 创建具有更宽标签的字段展示组件
+ */
+export const withWiderLabel = (labelSpan: number = 6) => {
+  const WiderLabelFieldDisplay = React.memo(
+    ({
+      displayOption,
+      state,
+      onChange,
+    }: {
+      displayOption?: {
+        labelSpan?: number;
+        fieldSpan?: number;
+      };
+      state: ImmutableFormState;
+      onChange: (value: FieldValue, path: FieldPath) => void;
+    }) => {
+      // 覆盖 labelSpan，相应调整 fieldSpan
+      const adjustedDisplayOption = {
+        ...displayOption,
+        labelSpan: labelSpan,
+        fieldSpan: 24 - labelSpan, // 确保总和为24
+      };
+
+      return (
+        <DefaultFieldDisplay
+          displayOption={adjustedDisplayOption}
+          state={state}
+          onChange={onChange}
+        />
+      );
+    }
+  );
+
+  WiderLabelFieldDisplay.displayName = `WiderLabelFieldDisplay(${labelSpan})`;
+
+  return WiderLabelFieldDisplay;
+};
+
+/**
+ * 预设的宽标签字段展示组件
+ */
+export const WideFieldDisplay = withWiderLabel(6);
+export const ExtraWideFieldDisplay = withWiderLabel(8);
+
 const Generator = ({
   model,
   displayFields,
@@ -308,7 +332,7 @@ const Generator = ({
   );
   // 处理字段值变化的回调
   const handleChange = (value: FieldValue, path: FieldPath) => {
-    model.setValue(path, value, { invokeOnChange: true });
+    model.setValue(path, value, { invokeOnChange: true }, true);
     // 可选：实时验证
     model.validateField(path, true).catch(() => {
       // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage

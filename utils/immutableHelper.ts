@@ -14,7 +14,7 @@ export function mutableNodeToImmutableNode(
       path: sourceNode.path,
       type: "field",
       prop: {
-        label: sourceNode.staticProp.label!,
+        label: sourceNode.staticProp.label,
         visible: sourceNode.dynamicProp.visible,
         value: sourceNode.dynamicProp.value || null,
         errorMessage: sourceNode.dynamicProp.errorMessage,
@@ -36,6 +36,7 @@ export function mutableNodeToImmutableNode(
     }
     // 如果发生了变化，或者是第一次来，都需要生成并赋值
     snapshotInfo.lastValue = leafNode;
+    snapshotInfo.version--;
     return leafNode;
   }
 
@@ -61,6 +62,7 @@ export function mutableNodeToImmutableNode(
   }
 
   snapshotInfo.lastValue = nestedField;
+  snapshotInfo.version--;
 
   return nestedField;
 }

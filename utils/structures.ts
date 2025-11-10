@@ -110,14 +110,14 @@ function compileOneNode(
       dynamicProp: {
         value: item.defaultValue,
         visible: item.initialVisible ?? true,
-        validation:
-          item.validate || z.unknown().nonoptional({ message: "请填写！" }),
+        validation: item.validate || z.unknown(),
         controlProp: item.controlProps,
       },
       staticProp: {
         label: item.label || "未命名",
         toolTip: item.helpTip,
-        control: item.control || "input",
+        control: item.control,
+        defaultValue: item.defaultValue,
         FieldDisplayComponent: item.FieldDisplayComponent,
       },
       snapshot: {
@@ -372,7 +372,7 @@ class FormModel {
     }
   }
 
-  setVisible(path: FieldPath, visible: boolean) {
+  setVisible(path: FieldPath, visible: boolean, shouldNotify = false) {
     const dfs = (
       node: MutableFieldNode,
       update: (node: MutableFieldNode) => void
@@ -404,6 +404,10 @@ class FormModel {
 
     this.validatorCacheManager.rebuild();
     this.plainCacheManager.rebuild();
+
+    if (shouldNotify) {
+      this.notify();
+    }
   }
 
   setValue(
@@ -412,7 +416,8 @@ class FormModel {
     option?: {
       invokeOnChange?: boolean;
       invokeEffect?: boolean;
-    }
+    },
+    shouldNotify: boolean = false
   ) {
     setMutableNode(
       this.mutableDataSource,
@@ -465,9 +470,117 @@ class FormModel {
       },
       this.currentVersion
     );
+    if (shouldNotify) {
+      this.notify();
+    }
   }
 
-  setValidation(path: FieldPath, validator: z.ZodType) {
+  setValues(
+    path: FieldPath,
+    values: Record<string, any>,
+    option?: {
+      invokeOnChange?: boolean;
+      invokeEffect?: boolean;
+    },
+    shouldNotify: boolean = false
+  ) {
+    const triggerRules = option?.invokeEffect ?? true;
+    const currentVersion = this.currentVersion;
+
+    setMutableNode(
+      this.mutableDataSource,
+      path,
+      (node, _nodes, update) => {
+        const dfs = (
+          node: MutableFieldNode,
+          value:
+            | string
+            | boolean
+            | number
+            | Record<string, any>
+            | undefined
+            | null
+        ): boolean => {
+          if (node.type === "field" && value !== undefined) {
+            node.dynamicProp.value = value;
+            update(node);
+            this.plainCacheManager.updateNode(node);
+            if (triggerRules) {
+              this.triggerEffectsFor(node.path.slice(1), "value-changed");
+            }
+            if (node.key === "TCS_OPTIONS") {
+              console.log(node);
+              debugger;
+            }
+            return true;
+          }
+          let updated = false;
+          if (node.type === "object") {
+            node.children.forEach((n) => {
+              if (typeof value === "object" && value !== null) {
+                if (dfs(n, value[n.key])) {
+                  updated = true;
+                }
+              }
+            });
+          } else if (node.type === "array") {
+            // 数组和对象均可
+            if (typeof value !== "object" || value === null) {
+              return false;
+            }
+            const rootSchema: FieldSchema = {
+              key: node.key,
+              isArray: true,
+              arraySchema: node.staticProp.schema,
+            };
+            const res = compileArrayNode(
+              value,
+              rootSchema,
+              node.path,
+              node,
+              this.currentVersion
+            );
+
+            if (res.type === "array") {
+              node.children = res.children;
+              updated = true;
+            }
+          }
+          if (updated) {
+            this.plainCacheManager.updateNode(node);
+            update(node);
+          }
+          return updated;
+        };
+        dfs(node, values);
+      },
+      this.currentVersion
+    );
+
+    if ((option?.invokeOnChange ?? true) && this.onChange) {
+      this.plainCacheManager.rebuild();
+      const node = this.findNodeByPath(path);
+      let value: Record<string, any> | undefined = undefined;
+      if (!node) {
+        throw new Error("the field is not found:" + path);
+      }
+      if (node.cache.plainObj.type !== "dirty") {
+        value = node.cache.plainObj.objectOnlyIncludesHidden;
+      }
+
+      this.onChange(path, value);
+    }
+
+    if (shouldNotify) {
+      this.notify();
+    }
+  }
+
+  setValidation(
+    path: FieldPath,
+    validator: z.ZodType,
+    shouldNotify: boolean = false
+  ) {
     const node = this.findNodeByPath(path);
     if (!node) {
       throw new Error("the field is not found:" + path);
@@ -494,6 +607,9 @@ class FormModel {
         },
         this.currentVersion
       );
+      if (shouldNotify) {
+        this.notify();
+      }
     } else {
       // 如果 isOptional 状态未改变，直接更新
       node.dynamicProp.validation = validator;
@@ -518,7 +634,11 @@ class FormModel {
     return getNodesOnPath(this.mutableDataSource, path, containsRoot);
   }
 
-  setAlertTip(path: FieldPath, content: React.ReactNode) {
+  setAlertTip(
+    path: FieldPath,
+    content: React.ReactNode,
+    shouldNotify: boolean = false
+  ) {
     setMutableNode(
       this.mutableDataSource,
       path,
@@ -530,9 +650,17 @@ class FormModel {
       },
       this.currentVersion
     );
+    if (shouldNotify) {
+      this.notify();
+    }
   }
 
-  setItemsProp(path: FieldPath, propName: string, propValue: any) {
+  setItemsProp(
+    path: FieldPath,
+    propName: string,
+    propValue: any,
+    shouldNotify: boolean = false
+  ) {
     setMutableNode(
       this.mutableDataSource,
       path,
@@ -559,12 +687,16 @@ class FormModel {
       },
       this.currentVersion
     );
+    if (shouldNotify) {
+      this.notify();
+    }
   }
 
   setArray(
     path: FieldPath,
     value: Record<string, any>,
-    option?: { shouldTriggerRule?: boolean }
+    option?: { shouldTriggerRule?: boolean },
+    shouldNotify: boolean = false
   ) {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error("the field is not found");
@@ -603,6 +735,10 @@ class FormModel {
     if (option?.shouldTriggerRule) {
       this.triggerEffectsFor(path, "children-updated");
     }
+
+    if (shouldNotify) {
+      this.notify();
+    }
   }
 
   /**
@@ -616,7 +752,8 @@ class FormModel {
     path: FieldPath,
     value: Record<string, any>,
     position: "before" | "after" = "before",
-    key?: FieldKey
+    key?: FieldKey,
+    shouldNotify: boolean = false
   ) {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error("the field is not found");
@@ -661,6 +798,9 @@ class FormModel {
     );
     this.plainCacheManager.updateNode(node);
     this.validatorCacheManager.updateNode(node);
+    if (shouldNotify) {
+      this.notify();
+    }
   }
 
   /**
@@ -669,7 +809,12 @@ class FormModel {
    * @param key 要设置或删除的元素的 key
    * @param value 元素的值；如果为 undefined，则删除该元素
    */
-  setItemOfArray(path: FieldPath, key: FieldKey, value: any) {
+  setItemOfArray(
+    path: FieldPath,
+    key: FieldKey,
+    value: any,
+    shouldNotify: boolean = false
+  ) {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error("the field is not found");
     if (node.type !== "array") {
@@ -733,6 +878,10 @@ class FormModel {
 
     this.plainCacheManager.updateNode(node);
     this.validatorCacheManager.updateNode(node);
+
+    if (shouldNotify) {
+      this.notify();
+    }
   }
 
   getSnapshot(): ImmutableFormState {
@@ -740,7 +889,7 @@ class FormModel {
       this.mutableDataSource,
       this.currentVersion
     );
-    this.currentVersion++;
+    // this.currentVersion++;
     return res;
   }
 
@@ -763,6 +912,7 @@ class FormModel {
         setArray: () => void 0,
         setAlertTip: () => void 0,
         setItemProp: () => void 0,
+        insertIntoArray: () => void 0,
       },
       "dependencies-collecting"
     );
@@ -822,6 +972,8 @@ class FormModel {
           },
           // this.updateChildren(path, chilren, option),
           setAlertTip: (path, content) => this.setAlertTip(path, content),
+          insertIntoArray: (path, value, position) =>
+            this.insertIntoArray(path, value, position),
           setItemProp: (path, propName, propValue) =>
             this.setItemsProp(path, propName, propValue),
         },
@@ -837,10 +989,10 @@ class FormModel {
     cause: EffectInvokeReason
   ) {
     const node = this.findNodeByPath(depFieldPath);
-    if (!node) throw new Error("the field is not found");
-    const list = node.effect;
-    if (!list) return;
-    this.runEffects(list, cause, { changedPath: depFieldPath });
+    if (!node) throw new Error("the field is not found: " + depFieldPath);
+    const set = node.effect;
+    if (!set) return;
+    this.runEffects(set, cause, { changedPath: depFieldPath });
   }
 
   /**
@@ -853,7 +1005,7 @@ class FormModel {
     const collectLeafPaths = (n: MutableFieldNode) => {
       // 如果是叶子节点（没有子节点或子节点为空）
       if (n.type === "field") {
-        result.push([...n.path]); // 添加当前节点的路径到结果中
+        result.push([...n.path.slice(1)]); // 添加当前节点的路径到结果中
       }
       // 如果有子节点，递归处理
       else if (n.children && n.children.length > 0) {
@@ -901,11 +1053,15 @@ class FormModel {
    * 如需触发联动的字段校验请用`registerRule`手动触发校验
    * @param enableEnhancer 是否启用祖先字段上的跨字段校验函数
    */
-  validateField(path: FieldPath, enableEnhancer?: boolean): Promise<any> {
+  validateField(
+    path: FieldPath,
+    enableEnhancer?: boolean,
+    shouldNotify: boolean = false
+  ): Promise<any> {
     // 在校验前先收集最终对象
     this.plainCacheManager.rebuild();
     this.validatorCacheManager.rebuild();
-    let finalError = undefined;
+    let finalError: ZodError | undefined = undefined;
     if (!enableEnhancer) {
       setMutableNode(
         this.mutableDataSource,
@@ -1025,8 +1181,9 @@ class FormModel {
         throw new Error("dirty value");
       }
     }
-
-    this.notify();
+    if (shouldNotify) {
+      this.notify();
+    }
 
     if (!finalError) return Promise.resolve();
     else return Promise.reject(finalError);
@@ -1035,7 +1192,68 @@ class FormModel {
   async validateAllFields(): Promise<any> {
     // 在校验前先收集最终对象
     this.lastFinalPlainObj = this.plainCacheManager.getFinalPlainObject();
-    await this.validateField([], false);
+    try {
+      await this.validateField([], false);
+    } finally {
+      this.notify();
+    }
+  }
+
+  /**
+   * 重置指定路径下的所有字段为默认值
+   * @param path 要重置的路径，省略则从根节点开始重置全部字段
+   * @param shouldNotify 是否触发通知，默认为 true
+   */
+  resetFields(path?: FieldPath, shouldNotify: boolean = true) {
+    const targetPath = path || [];
+    const node = this.findNodeByPath(targetPath);
+
+    if (!node) {
+      throw new Error("the field is not found: " + targetPath.join("."));
+    }
+
+    setMutableNode(
+      this.mutableDataSource,
+      targetPath,
+      (node, _nodes, update) => {
+        const resetNode = (n: MutableFieldNode) => {
+          if (n.type === "field") {
+            // 重置字段值为默认值
+            const defaultValue = n.staticProp.defaultValue;
+            n.dynamicProp.value = defaultValue;
+            // 清除错误信息
+            n.dynamicProp.errorMessage = undefined;
+            // 更新缓存
+            this.plainCacheManager.updateNode(n);
+            this.validatorCacheManager.updateNode(n);
+            update(n);
+          } else if (n.type === "array") {
+            // 清空数组字段的子元素
+            n.children = [];
+            this.plainCacheManager.updateNode(n);
+            this.validatorCacheManager.updateNode(n);
+            update(n);
+          } else if (n.type === "object") {
+            // 递归重置对象字段的所有子字段
+            n.children.forEach((child) => {
+              resetNode(child);
+              update(child);
+            });
+          }
+        };
+
+        resetNode(node);
+      },
+      this.currentVersion
+    );
+
+    // 重建缓存
+    this.plainCacheManager.rebuild();
+    this.validatorCacheManager.rebuild();
+
+    if (shouldNotify) {
+      this.notify();
+    }
   }
 }
 

@@ -46,8 +46,12 @@ export type ReactiveEffectContext = {
     option?: { shouldTriggerRule?: boolean }
   ) => void;
   setAlertTip: (path: FieldPath, content: React.ReactNode) => void;
-  /** 设置字段禁用状态；若 path 指向非叶子，则批量设置其所有后代叶子 */
   setItemProp: (path: FieldPath, propName: string, propValue: any) => void;
+  insertIntoArray: (
+    path: FieldPath,
+    value: Record<string, any>,
+    position: "before" | "after"
+  ) => void;
 };
 
 export interface ReactiveRule {
@@ -126,7 +130,7 @@ export type FieldSchema =
   | {
       key: FieldKey;
       label: string;
-      control: ControlType;
+      control?: ControlType;
       validate?: ZodType;
       initialVisible?: boolean;
       controlProps?: Record<string, unknown>;
@@ -171,11 +175,12 @@ export interface LeafDynamicProp {
 export interface LeafFieldStaticProp {
   label: string;
   toolTip: React.ReactNode;
-  control: ControlType;
+  control?: ControlType;
   FieldDisplayComponent?: React.ElementType<{
     state: ImmutableFormState;
     onChange: (value: FieldValue, path: FieldPath) => void;
   }>;
+  defaultValue: FieldValue;
 }
 
 export interface NestedFieldStaticProp {
@@ -277,7 +282,7 @@ export type ImmutableFormFieldProp = {
   visible: boolean;
   alertTip?: React.ReactNode;
   toolTip?: React.ReactNode;
-  control: ControlType;
+  control?: ControlType;
   controlProps?: Record<string, any>;
   required: boolean;
 };
