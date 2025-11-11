@@ -69,7 +69,7 @@ class ValidatorCacheManager {
         for (let child of node.children) {
           const res = dfs(child);
           // 只收集可见且有校验规则的字段
-          if (res && res.type === "hasValue") {
+          if (res && res.type === "hasValue" && node.dynamicProp.visible) {
             validatorMap[child.key] = res.validator;
           }
         }

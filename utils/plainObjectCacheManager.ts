@@ -72,10 +72,11 @@ class PlainObjectCacheManager {
         const validateObj: Record<string, any> = {};
         const objOnlyIncludesHdn: Record<string, any> = {};
         const submitObj: Record<string, any> = {};
+
         for (let i of node.children) {
           const res = dfs(i);
           // 一定不是undefined了
-          if (res && res.type === "hasValue") {
+          if (res && res.type === "hasValue" && node.dynamicProp.visible) {
             validateObj[i.key] = res.objectOnly;
             submitObj[i.key] = res.submitData;
           }

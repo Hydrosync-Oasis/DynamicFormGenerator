@@ -69,7 +69,7 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       key: item.key,
       path: path,
       type: "array",
-      dynamicProp: {},
+      dynamicProp: { visible: item.visible ?? true },
       staticProp: {
         schema: item.arraySchema!,
         LayoutComponent: item.LayoutComponent,
@@ -86,7 +86,7 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       key: item.key,
       path: path,
       type: "object",
-      dynamicProp: {},
+      dynamicProp: { visible: item.visible ?? true },
       staticProp: {
         LayoutComponent: item.LayoutComponent,
       },
@@ -175,7 +175,7 @@ const compileNodes = (
 };
 
 const compileArrayNode = (
-  value: Record<string, any>,
+  value: Record<string, any> | undefined,
   schema: FieldSchema,
   path: FieldPath,
   rootArrayField: MutableFieldNode & { type: "array" },
@@ -199,7 +199,7 @@ const compileArrayNode = (
     node.children = children;
     node.rootArrayField = rootArrayField;
     // value输入可以是数组，也可以是一个对象，如果是对象，那么对象的key就是字段的key
-    Object.entries(value).forEach(([key, v]) => {
+    Object.entries(value || {}).forEach(([key, v]) => {
       const childSchema: FieldSchema = {
         ...schema.arraySchema,
         key: key,
@@ -223,12 +223,14 @@ const compileArrayNode = (
     };
     node.children = children;
     node.rootArrayField = rootArrayField;
-    // value输入是一个对象
-    Object.entries(value).forEach(([k, v]) => {
+    // value输入是一个对象，遍历schema来从value中取值
+    schema.childrenFields!.forEach((childSchema) => {
+      const k = childSchema.key;
+      const v = value?.[k];
       children.push(
         compileArrayNode(
           v,
-          schema.childrenFields!.find((x) => x.key === k)!,
+          childSchema,
           [...path, k],
           rootArrayField,
           currentVersion
@@ -269,7 +271,7 @@ class FormModel {
       path: ["dummy"],
       type: "object",
       children: [],
-      dynamicProp: {},
+      dynamicProp: { visible: true },
       staticProp: {},
       snapshot: { dirty: true },
       cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
@@ -337,7 +339,7 @@ class FormModel {
 
   get(path: FieldPath, prop: "value" | "errorMessage" | "visible"): any {
     const node = this.findNodeByPath(path);
-    if (!node) throw new Error("the field is not found");
+    if (!node) throw new Error("the field is not found: " + path);
 
     if (!node.dynamicProp) {
       throw new Error("node has no state: " + path.join("."));
@@ -345,7 +347,7 @@ class FormModel {
     // 对于非叶子节点，如果要获取value，返回undefined或者抛出错误
     if (node.type === "array") {
       this.plainCacheManager.rebuild();
-      if (node.cache.plainObj.type !== "hasValue") {
+      if (node.cache.plainObj.type === "dirty") {
         return {};
       } else {
         return node.cache.plainObj.objectOnlyIncludesHidden;
@@ -360,28 +362,10 @@ class FormModel {
   }
 
   setVisible(path: FieldPath, visible: boolean, shouldNotify = false) {
-    const dfs = (
-      node: MutableFieldNode,
-      update: (node: MutableFieldNode) => void
-    ) => {
-      if (node.type === "field") {
-        node.dynamicProp.visible = visible;
-
-        // 可见性变更后，标记缓存
-        this.plainCacheManager.updateNode(node);
-        this.validatorCacheManager.updateNode(node);
-        update(node);
-        return;
-      }
-
-      for (let i of node.children) {
-        dfs(i, update);
-        update(i);
-      }
-    };
-
-    setMutableNode(this.mutableDataSource, path, (node, _path, update) => {
-      dfs(node, update);
+    setMutableNode(this.mutableDataSource, path, (node) => {
+      node.dynamicProp.visible = visible;
+      this.validatorCacheManager.updateNode(node);
+      this.plainCacheManager.updateNode(node);
     });
 
     this.validatorCacheManager.rebuild();
@@ -390,6 +374,7 @@ class FormModel {
     if (shouldNotify) {
       this.notify();
     }
+    // console.log(this.mutableDataSource);
   }
 
   setValue(
@@ -460,7 +445,6 @@ class FormModel {
     shouldNotify: boolean = false
   ) {
     const triggerRules = option?.invokeEffect ?? true;
-    const currentVersion = this.currentVersion;
 
     setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
       const dfs = (
@@ -480,10 +464,7 @@ class FormModel {
           if (triggerRules) {
             this.triggerEffectsFor(node.path.slice(1), "value-changed");
           }
-          if (node.key === "TCS_OPTIONS") {
-            console.log(node);
-            debugger;
-          }
+
           return true;
         }
         let updated = false;
@@ -869,6 +850,8 @@ class FormModel {
 
   /** 主动触发一次全量规则（初始化时可用） */
   initial() {
+    this.plainCacheManager.rebuild();
+    this.validatorCacheManager.rebuild();
     this.runEffects(
       new Set(
         [...this.rules].map((r) => {
@@ -877,8 +860,6 @@ class FormModel {
       ),
       "initial-run"
     );
-    this.plainCacheManager.rebuild();
-    this.validatorCacheManager.rebuild();
     this.notify();
   }
 
@@ -974,11 +955,20 @@ class FormModel {
   }
 
   /** 校验指定路径，校验时自动带上父字段上定义的enhancer，所以可跨字段校验 */
-  validateFields(pathargs: FieldPath[]): Promise<any> {
-    const promises = pathargs.map((path) => {
-      return this.validateField(path, true);
-    });
-    return Promise.all(promises);
+  async validateFields(
+    pathargs: FieldPath[],
+    shouldNotify: boolean = false
+  ): Promise<any> {
+    try {
+      const promises = pathargs.map((path) => {
+        return this.validateField(path, true);
+      });
+      await Promise.all(promises);
+    } finally {
+      if (shouldNotify) {
+        this.notify();
+      }
+    }
   }
 
   /** 校验某一个字段，如果是一个嵌套字段，校验内部嵌套的所有可见字段；仅设置该字段的错误信息，
@@ -1058,7 +1048,6 @@ class FormModel {
       const validation = this.mutableDataSource.cache.validator;
       if (value.type === "hasValue" && validation.type === "hasValue") {
         const res = validation.validator.safeParse(value.objectOnly);
-
         const info = res.success
           ? undefined
           : res.error.issues.filter((e) =>
@@ -1070,7 +1059,7 @@ class FormModel {
             if (node.type === "field") {
               if (isChildNode(node.path.slice(1), path)) {
                 const msg = info?.find((x) => {
-                  return isSamePath(x.path as string[], path);
+                  return isSamePath(x.path as string[], node.path.slice(1));
                 })?.message;
                 node.dynamicProp.errorMessage = msg;
                 mutate(node);

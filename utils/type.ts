@@ -145,6 +145,7 @@ export type FieldSchema =
   | {
       key: FieldKey;
       isArray: true;
+      visible?: boolean;
       arraySchema: Omit<FieldSchema, "key">;
       LayoutComponent?: React.ElementType<{
         children: React.ReactNode;
@@ -155,6 +156,7 @@ export type FieldSchema =
   | {
       key: FieldKey;
       isArray: false;
+      visible?: boolean;
       childrenFields: FieldSchema[];
       LayoutComponent?: React.ElementType<{
         children: React.ReactNode;
@@ -192,6 +194,7 @@ export interface NestedFieldStaticProp {
 
 export interface NestedFieldDynamicProp {
   validationRefine?: (z: ZodType) => ZodType;
+  visible: boolean;
 }
 
 type MutableFieldNodeBaseType = {

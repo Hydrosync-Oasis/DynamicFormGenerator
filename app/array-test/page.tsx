@@ -175,6 +175,137 @@ export default function ArrayTestPage() {
             ],
           },
         },
+        // 第一个字段：IP 输入框
+        {
+          key: "ipAddresses2",
+          label: "IP地址列表2",
+          control: "input",
+          controlProps: {
+            placeholder: "请输入IP地址，多个用英文逗号分隔",
+          },
+          validate: z
+            .string()
+            .min(1, { message: "请输入IP地址" })
+            .refine(
+              (val) => {
+                const ips = val.split(",").map((ip) => ip.trim());
+                return ips.every((ip) => {
+                  // 简单的IP格式验证
+                  const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+                  return ipRegex.test(ip);
+                });
+              },
+              { message: "请输入有效的IP地址格式" }
+            ),
+          helpTip: "示例：192.168.1.1, 10.0.0.1",
+        },
+        // 第二个字段：数组型嵌套字段
+        {
+          key: "servers2",
+          isArray: true,
+          LayoutComponent: ServersFlexLayout,
+          arraySchema: {
+            isArray: false,
+            LayoutComponent: ServerCardLayout,
+            childrenFields: [
+              // 第一个字段：服务器名称
+              {
+                key: "serverName",
+                label: "服务器名称",
+                control: "input",
+                controlProps: {
+                  placeholder: "请输入服务器名称",
+                },
+                validate: z.string().min(1, { message: "请输入服务器名称" }),
+                FieldDisplayComponent: WiderLabelField,
+              },
+              // 第二个字段：端口号
+              {
+                key: "port",
+                label: "端口号",
+                control: "input",
+                controlProps: {
+                  placeholder: "请输入端口号",
+                  type: "number",
+                },
+                validate: z
+                  .string()
+                  .min(1, { message: "请输入端口号" })
+                  .refine(
+                    (val) => {
+                      const port = parseInt(val);
+                      return port > 0 && port <= 65535;
+                    },
+                    { message: "端口号必须在1-65535之间" }
+                  ),
+                FieldDisplayComponent: WiderLabelField,
+              },
+            ],
+          },
+        },
+        // 虚拟字段：用于存放 servers 和 servers2 的并集（记忆状态）
+        {
+          key: "serversMemory",
+          label: "服务器记忆状态（虚拟字段）",
+          visible: false,
+          isArray: true,
+          LayoutComponent: ServersFlexLayout,
+          arraySchema: {
+            isArray: false,
+            LayoutComponent: ServerCardLayout,
+            childrenFields: [
+              {
+                key: "serverName",
+                label: "服务器名称",
+                control: "input",
+                controlProps: {
+                  placeholder: "请输入服务器名称",
+                  disabled: true,
+                },
+                validate: z.string().optional(),
+                FieldDisplayComponent: WiderLabelField,
+              },
+              {
+                key: "port",
+                label: "端口号",
+                control: "input",
+                controlProps: {
+                  placeholder: "请输入端口号",
+                  type: "number",
+                  disabled: true,
+                },
+                validate: z.string().optional(),
+                FieldDisplayComponent: WiderLabelField,
+              },
+              {
+                key: "protocol",
+                label: "协议类型",
+                control: "radio",
+                controlProps: {
+                  options: [
+                    { label: "HTTP", value: "http" },
+                    { label: "HTTPS", value: "https" },
+                  ],
+                  disabled: true,
+                },
+                validate: z.enum(["http", "https"]).optional(),
+                FieldDisplayComponent: WiderLabelField,
+              },
+              {
+                key: "sslCertPath",
+                label: "SSL证书路径",
+                control: "input",
+                controlProps: {
+                  placeholder: "请输入SSL证书路径",
+                  disabled: true,
+                },
+                validate: z.string().optional(),
+                initialVisible: false,
+                FieldDisplayComponent: WiderLabelField,
+              },
+            ],
+          },
+        },
       ] satisfies FieldSchema[],
     }),
     []
@@ -197,8 +328,7 @@ export default function ArrayTestPage() {
           .map((ip) => ip.trim())
           .filter((ip) => ip.length > 0);
 
-        const currentServers = ctx.get(["servers"], false) || {};
-        const currentKeys = Object.keys(currentServers);
+        const currentServers = ctx.get(["serversMemory"], false) || {};
 
         // 使用IP地址作为key
         const newServers: Record<string, any> = {};
@@ -216,13 +346,7 @@ export default function ArrayTestPage() {
           }
         });
 
-        // 只有在服务器配置发生变化时才更新
-        if (
-          JSON.stringify(currentKeys.sort()) !==
-          JSON.stringify(Object.keys(newServers).sort())
-        ) {
-          ctx.setArray(["servers"], newServers, { shouldTriggerRule: true });
-        }
+        ctx.setArray(["servers"], newServers, { shouldTriggerRule: true });
       } else if (!ipAddresses || ipAddresses.trim() === "") {
         // 如果IP地址为空，清空服务器数组
         const currentServers = ctx.get(["servers"], false) || {};
@@ -258,14 +382,113 @@ export default function ArrayTestPage() {
       }
     });
 
+    // 注册联动规则1：根据IP数量自动调整服务器数组项数
+    model.registerRule((ctx, cause) => {
+      const ipAddresses = ctx.get(["ipAddresses2"]);
+
+      if (typeof ipAddresses === "string" && ipAddresses.trim()) {
+        // 解析IP地址列表
+        const ips = ipAddresses
+          .split(",")
+          .map((ip) => ip.trim())
+          .filter((ip) => ip.length > 0);
+
+        const currentServers = ctx.get(["serversMemory"], false) || {};
+        const currentKeys = Object.keys(currentServers);
+
+        // 使用IP地址作为key
+        const newServers: Record<string, any> = {};
+        ips.forEach((ip, index) => {
+          // 如果已存在该IP的服务器配置，保留它；否则创建新的
+          if (currentServers[ip]) {
+            newServers[ip] = currentServers[ip];
+          } else {
+            newServers[ip] = {
+              serverName: `服务器${index + 1}`,
+              port: "8080",
+            };
+          }
+        });
+
+        ctx.setArray(["servers2"], newServers, { shouldTriggerRule: true });
+      } else if (!ipAddresses || ipAddresses.trim() === "") {
+        // 如果IP地址为空，清空服务器数组
+        const currentServers = ctx.get(["servers2"], false) || {};
+        if (Object.keys(currentServers).length > 0) {
+          ctx.setArray(["servers2"], {}, { shouldTriggerRule: false });
+        }
+      }
+    });
+
+    // 注册联动规则3：当 servers 变化时，更新虚拟字段 serversMemory
+    model.registerRule((ctx, cause) => {
+      const servers = ctx.get(["servers"], true) || {};
+      const currentMemory = ctx.get(["serversMemory"], false) || {};
+
+      // 将 servers 和 currentMemory 取并集，servers 的值优先
+      const newMemory: Record<string, any> = { ...currentMemory };
+      Object.keys(servers).forEach((key) => {
+        newMemory[key] = { ...newMemory[key], ...servers[key] };
+      });
+
+      // 更新虚拟字段
+      ctx.setArray(["serversMemory"], newMemory, { shouldTriggerRule: true });
+    });
+
+    // 注册联动规则4：当 servers2 变化时，更新虚拟字段 serversMemory
+    model.registerRule((ctx, cause) => {
+      const servers2 = ctx.get(["servers2"], true) || {};
+      const currentMemory = ctx.get(["serversMemory"], false) || {};
+
+      // 将 servers2 和 currentMemory 取并集，servers2 的值优先
+      const newMemory: Record<string, any> = { ...currentMemory };
+      Object.keys(servers2).forEach((key) => {
+        newMemory[key] = { ...newMemory[key], ...servers2[key] };
+      });
+
+      // 更新虚拟字段
+      ctx.setArray(["serversMemory"], newMemory, { shouldTriggerRule: true });
+    });
+
+    // 注册联动规则5：当虚拟字段 serversMemory 变化时，同步到 servers 和 servers2
+    model.registerRule((ctx, cause) => {
+      const memory = ctx.get(["serversMemory"], true) || {};
+      const servers = ctx.get(["servers"], false) || {};
+      const servers2 = ctx.get(["servers2"], false) || {};
+
+      // 同步到 servers（只更新同key的项）
+      const newServers = { ...servers };
+      let serversChanged = false;
+      Object.keys(memory).forEach((key) => {
+        if (newServers[key]) {
+          newServers[key] = { ...newServers[key], ...memory[key] };
+          serversChanged = true;
+        }
+      });
+      if (serversChanged) {
+        ctx.setArray(["servers"], newServers, { shouldTriggerRule: false });
+      }
+
+      // 同步到 servers2（只更新同key的项，只取需要的字段）
+      const newServers2 = { ...servers2 };
+      let servers2Changed = false;
+      Object.keys(memory).forEach((key) => {
+        if (newServers2[key]) {
+          const { serverName, port } = memory[key];
+          newServers2[key] = { ...newServers2[key], serverName, port };
+          servers2Changed = true;
+        }
+      });
+      if (servers2Changed) {
+        ctx.setArray(["servers2"], newServers2, { shouldTriggerRule: false });
+      }
+    });
+
     model.initial();
   }, [model]);
 
   // 展示字段
-  const displayFields: FieldPath[] = useMemo(
-    () => [["ipAddresses"], ["servers"]],
-    []
-  );
+  const displayFields: FieldPath[] = useMemo(() => [[]], []);
 
   // 添加服务器
   const handleAddServer = () => {

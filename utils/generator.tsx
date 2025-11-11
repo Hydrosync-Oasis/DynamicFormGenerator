@@ -61,7 +61,8 @@ const useDynamicForm = (model: FormModel) => {
        */
       validateFields: (paths: FieldPath[]) => {
         return model.validateFields(
-          paths.filter((path) => model.get(path, "visible"))
+          paths.filter((path) => model.get(path, "visible")),
+          true
         );
       },
     };
@@ -82,12 +83,16 @@ export const DefaultFieldDisplay = React.memo(
     displayOption?: {
       labelSpan?: number;
       fieldSpan?: number;
+      fontSize?: number;
+      lineHeight?: number;
     };
     state: ImmutableFormState;
     onChange: (value: FieldValue, path: FieldPath) => void;
   }) => {
     const labelSpan = displayOption?.labelSpan ?? 4;
     const fieldSpan = displayOption?.fieldSpan ?? 20;
+    const fontSize = displayOption?.fontSize ?? 14;
+    const lineHeight = displayOption?.lineHeight ?? 32;
 
     if (state.type !== "field") {
       throw new Error("Field component requires a field-type state");
@@ -119,6 +124,7 @@ export const DefaultFieldDisplay = React.memo(
         <Control
           id={path.join("/")}
           value={value}
+          status={errorMessage && "error"}
           {...controlProps}
           onChange={(value) => onChange(value, path)}
         />
@@ -189,7 +195,7 @@ export const DefaultFieldDisplay = React.memo(
                 style={{
                   textAlign: "right",
                   paddingRight: "8px",
-                  lineHeight: "32px",
+                  lineHeight: `${lineHeight}px`,
                 }}
               >
                 {/* 标签+冒号 */}
@@ -200,6 +206,7 @@ export const DefaultFieldDisplay = React.memo(
                     flexDirection: "row-reverse",
                     gap: "4px",
                     color: "#000000",
+                    fontSize: fontSize,
                   }}
                 >
                   <span>:</span>
@@ -224,7 +231,7 @@ export const DefaultFieldDisplay = React.memo(
                         style={{
                           color: "#ff4d4f",
                           marginRight: 4,
-                          fontSize: 14,
+                          fontSize: fontSize,
                           fontFamily: "SimSun,sans-serif",
                         }}
                       >
@@ -252,7 +259,7 @@ export const DefaultFieldDisplay = React.memo(
                   <div
                     style={{
                       color: "#ff4d4f",
-                      fontSize: "13px",
+                      fontSize: fontSize - 1,
                     }}
                   >
                     {errorMessage}
@@ -272,7 +279,11 @@ DefaultFieldDisplay.displayName = "DefaultFieldDisplay";
 /**
  * HOC - 创建具有更宽标签的字段展示组件
  */
-export const withWiderLabel = (labelSpan: number = 6) => {
+export const withWiderLabel = (
+  labelSpan: number = 6,
+  fontSize?: number,
+  lineHeight?: number
+) => {
   const WiderLabelFieldDisplay = React.memo(
     ({
       displayOption,
@@ -282,6 +293,8 @@ export const withWiderLabel = (labelSpan: number = 6) => {
       displayOption?: {
         labelSpan?: number;
         fieldSpan?: number;
+        fontSize?: number;
+        lineHeight?: number;
       };
       state: ImmutableFormState;
       onChange: (value: FieldValue, path: FieldPath) => void;
@@ -291,6 +304,8 @@ export const withWiderLabel = (labelSpan: number = 6) => {
         ...displayOption,
         labelSpan: labelSpan,
         fieldSpan: 24 - labelSpan, // 确保总和为24
+        ...(fontSize !== undefined && { fontSize }), // 如果提供了 fontSize，则覆盖
+        ...(lineHeight !== undefined && { lineHeight }), // 如果提供了 lineHeight，则覆盖
       };
 
       return (
@@ -352,7 +367,7 @@ const Generator = ({
 
     // 如果有子节点，那么当前节点并无内容，仅渲染子节点
     if (state.type !== "field") {
-      if (state.children.length > 0) {
+      if (state.children.length > 0 && state.prop.visible) {
         // 渲染所有子节点
         const childrenNodes = state.children.map((child) => renderField(child));
 

@@ -52,7 +52,9 @@ export function mutableNodeToImmutableNode(
     key: sourceNode.key,
     path: sourceNode.path,
     type: "nested",
-    prop: {},
+    prop: {
+      visible: sourceNode.dynamicProp.visible,
+    },
     children: [],
     LayoutComponent: sourceNode.staticProp.LayoutComponent,
   };
