@@ -174,6 +174,15 @@ const compileNodes = (
   }
 };
 
+/**
+ * 全量编译schema为可变节点，不保留任何旧信息，适用于初次设置
+ * @param value
+ * @param schema
+ * @param path
+ * @param rootArrayField
+ * @param currentVersion
+ * @returns
+ */
 const compileArrayNode = (
   value: Record<string, any> | undefined,
   schema: FieldSchema,
@@ -251,9 +260,6 @@ class FormModel {
 
   /** 校验器缓存管理器 */
   private validatorCacheManager!: ValidatorCacheManager;
-
-  /** 最近一次收集到的最终对象 */
-  private lastFinalPlainObj?: Record<string, any>;
 
   private currentVersion: number;
 
@@ -402,6 +408,9 @@ class FormModel {
         if (node.type === "array") {
           throw new Error("please use updateChildren to set array field value");
         } else {
+          if (Object.is(node.dynamicProp.value, value)) {
+            return;
+          }
           node.dynamicProp.value = value;
           // 值变更后，标记缓存
           this.plainCacheManager.updateNode(node);
@@ -417,6 +426,12 @@ class FormModel {
           }
         }
       } else {
+        if (node.type !== "field") {
+          throw new Error("the field is not leaf-node:" + path);
+        }
+        if (Object.is(node.dynamicProp.value, value)) {
+          return;
+        }
         (node as MutableFieldNode & { type: "field" }).dynamicProp.value =
           value;
         // 值变更后，标记缓存
@@ -457,7 +472,12 @@ class FormModel {
           | undefined
           | null
       ): boolean => {
-        if (node.type === "field" && value !== undefined) {
+        if (node.type === "field") {
+          // 如果值相同，不更新
+          if (Object.is(node.dynamicProp.value, value)) {
+            return false;
+          }
+
           node.dynamicProp.value = value;
           update(node);
           this.plainCacheManager.updateNode(node);
@@ -470,7 +490,7 @@ class FormModel {
         let updated = false;
         if (node.type === "object") {
           node.children.forEach((n) => {
-            if (typeof value === "object" && value !== null) {
+            if (typeof value === "object" && value !== null && n.key in value) {
               if (dfs(n, value[n.key])) {
                 updated = true;
               }
@@ -481,31 +501,51 @@ class FormModel {
           if (typeof value !== "object" || value === null) {
             return false;
           }
-          const rootSchema: FieldSchema = {
-            key: node.key,
-            isArray: true,
-            arraySchema: node.staticProp.schema,
-          };
-          const res = compileArrayNode(
-            value,
-            rootSchema,
+          // 原地设置子节点，在现有node上更新
+          // 对于新key，单独编译，对于已有key，递归更新
+          const existingKeys = new Set(node.children.map((child) => child.key));
+          const newKeys: string[] = [];
+          Object.entries(value).forEach(([key, v]) => {
+            if (existingKeys.has(key)) {
+              const childNode = node.children.find(
+                (child) => child.key === key
+              )!;
+              if (dfs(childNode, v)) {
+                updated = true;
+              }
+            } else {
+              newKeys.push(key);
+            }
+          });
+          if (newKeys.length > 0) {
+            updated = true;
+          }
+          const newNodes = compileArrayNode(
+            Object.fromEntries(
+              Object.entries(value).filter(([k, v]) => {
+                return newKeys.includes(k);
+              })
+            ),
+            {
+              key: node.key,
+              isArray: true,
+              arraySchema: node.staticProp.schema,
+            },
             node.path,
             node,
             this.currentVersion
-          );
+          ) as MutableFieldNode & { type: "array" };
 
-          if (res.type === "array") {
-            node.children = res.children;
-            updated = true;
-          }
+          node.children.push(...newNodes.children);
         }
         if (updated) {
           this.plainCacheManager.updateNode(node);
+          this.validatorCacheManager.updateNode(node);
           update(node);
         }
         return updated;
       };
-      dfs(node, values);
+      return dfs(node, values);
     });
 
     if ((option?.invokeOnChange ?? true) && this.onChange) {
@@ -628,6 +668,13 @@ class FormModel {
     }
   }
 
+  /**
+   * 用于全量更新数组字段，如需保留数据，请使用 setValues，或 insertIntoArray，setItemOfArray
+   * @param path
+   * @param value
+   * @param option 是否触发数组字段绑定的规则
+   * @param shouldNotify
+   */
   setArray(
     path: FieldPath,
     value: Record<string, any>,
@@ -762,33 +809,14 @@ class FormModel {
       });
     } else {
       // 设置或更新元素
-      const schema = node.staticProp.schema;
-      const targetIndex = node.children.findIndex((child) => child.key === key);
+      const hasKey = node.children.some((child) => child.key === key);
 
-      if (targetIndex === -1) {
-        this.insertIntoArray(path, { [key]: value }, "after");
+      if (!hasKey) {
+        // key 不存在，抛出异常
+        throw new Error("the node is not found: " + path + ", key: " + key);
       } else {
-        // key 存在，更新该元素
-        const newNode = compileArrayNode(
-          { [key]: value },
-          {
-            key: node.key,
-            isArray: true,
-            arraySchema: schema,
-          },
-          ["dummy", ...path],
-          node,
-          this.currentVersion
-        ) as MutableFieldNode & {
-          type: "array";
-        };
-
-        setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
-          if (node.type !== "array") {
-            throw new Error("this field is not an array:" + path);
-          }
-          node.children.splice(targetIndex, 1, ...newNode.children);
-        });
+        // key 存在，使用 setValues 更新该元素
+        this.setValues(path, { [key]: value }, { invokeEffect: true }, false);
       }
     }
 
@@ -1096,7 +1124,6 @@ class FormModel {
 
   async validateAllFields(): Promise<any> {
     // 在校验前先收集最终对象
-    this.lastFinalPlainObj = this.plainCacheManager.getFinalPlainObject();
     try {
       await this.validateField([], false);
     } finally {

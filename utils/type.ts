@@ -148,7 +148,7 @@ export type FieldSchema =
       visible?: boolean;
       arraySchema: Omit<FieldSchema, "key">;
       LayoutComponent?: React.ElementType<{
-        children: React.ReactNode;
+        render: (state: ImmutableFormState) => React.ReactNode;
         state: ImmutableFormState;
       }>;
     }
@@ -159,7 +159,7 @@ export type FieldSchema =
       visible?: boolean;
       childrenFields: FieldSchema[];
       LayoutComponent?: React.ElementType<{
-        children: React.ReactNode;
+        render: (state: ImmutableFormState) => React.ReactNode;
         state: ImmutableFormState;
       }>;
     };
@@ -187,7 +187,7 @@ export interface LeafFieldStaticProp {
 
 export interface NestedFieldStaticProp {
   LayoutComponent?: React.ElementType<{
-    children: React.ReactNode;
+    render: (state: ImmutableFormState) => React.ReactNode;
     state: ImmutableFormState;
   }>;
 }
@@ -275,7 +275,7 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
           /** 定义了数组单个元素的结构体 */
           schema: Omit<FieldSchema, "key">;
           LayoutComponent?: React.ElementType<{
-            children: React.ReactNode;
+            render: (state: ImmutableFormState) => React.ReactNode;
             state: ImmutableFormState;
           }>;
         };
@@ -314,7 +314,7 @@ export type ImmutableFormState =
       prop: Partial<Omit<ImmutableFormFieldProp, "value" | "options">>;
       children: ImmutableFormState[];
       LayoutComponent?: React.ElementType<{
-        children: React.ReactNode;
+        render: (state: ImmutableFormState) => React.ReactNode;
         state: ImmutableFormState;
       }>;
     };

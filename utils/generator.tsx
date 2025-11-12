@@ -10,7 +10,12 @@ import {
   Tooltip,
   Flex,
 } from "antd";
-import React, { useSyncExternalStore, useMemo, useCallback } from "react";
+import React, {
+  useSyncExternalStore,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { FieldPath, FieldValue, FormModel } from "./structures";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import { ImmutableFormState } from "./type";
@@ -166,48 +171,37 @@ export const DefaultFieldDisplay = React.memo(
     return (
       <React.Fragment key={path.join("/")}>
         {/* 自定义表单项布局 */}
-        <Row>
-          <Col span={24}>
-            <Row style={{ marginBottom: 5 }}>
-              <Col offset={labelSpan} span={fieldSpan}>
+        <div className="w-full">
+          <div className="w-full">
+            <div className="mb-[5px]">
+              <div
+                className="w-full"
+                style={{
+                  marginLeft: `${(labelSpan / 24) * 100}%`,
+                  width: `${(fieldSpan / 24) * 100}%`,
+                }}
+              >
                 {/* Alert提示框 */}
                 {alertTip && (
-                  <ConfigProvider
-                    theme={{
-                      token: {
-                        fontSize: 12,
-                      },
-                      components: {
-                        Alert: {
-                          defaultPadding: "3px 6px",
-                        },
-                      },
-                    }}
-                  >
-                    <Alert message={alertTip} type="warning" />
-                  </ConfigProvider>
+                  <div className="bg-[#fffbe6] border border-[#ffe58f] rounded-sm px-[6px] py-[3px] text-xs text-[#000000d9]">
+                    {alertTip}
+                  </div>
                 )}
-              </Col>
-            </Row>
-            <Row>
-              <Col
-                span={labelSpan}
+              </div>
+            </div>
+            <div className="flex">
+              <div
+                className="text-right pr-2"
                 style={{
-                  textAlign: "right",
-                  paddingRight: "8px",
+                  width: `${(labelSpan / 24) * 100}%`,
                   lineHeight: `${lineHeight}px`,
                 }}
               >
                 {/* 标签+冒号 */}
                 <label
                   htmlFor={path.join("/")}
-                  style={{
-                    display: "flex",
-                    flexDirection: "row-reverse",
-                    gap: "4px",
-                    color: "#000000",
-                    fontSize: fontSize,
-                  }}
+                  className="flex flex-row-reverse gap-1 text-black"
+                  style={{ fontSize: fontSize }}
                 >
                   <span>:</span>
                   <>
@@ -228,9 +222,8 @@ export const DefaultFieldDisplay = React.memo(
                   <span>
                     {isRequired && (
                       <span
+                        className="text-[#ff4d4f] mr-1"
                         style={{
-                          color: "#ff4d4f",
-                          marginRight: 4,
                           fontSize: fontSize,
                           fontFamily: "SimSun,sans-serif",
                         }}
@@ -240,35 +233,36 @@ export const DefaultFieldDisplay = React.memo(
                     )}
                   </span>
                 </label>
-              </Col>
+              </div>
               {/* 字段组件内容 */}
-              <Col
-                span={fieldSpan}
+              <div
+                className="flex items-center"
+                style={{ width: `${(fieldSpan / 24) * 100}%` }}
+              >
+                <div className="flex-1">{FormFieldRenderer}</div>
+              </div>
+            </div>
+            {/* 校验错误信息 */}
+            <div className="flex">
+              <div
+                className="w-full"
                 style={{
-                  display: "flex",
-                  alignItems: "center",
+                  marginLeft: `${(labelSpan / 24) * 100}%`,
+                  width: `${(fieldSpan / 24) * 100}%`,
                 }}
               >
-                <div style={{ flex: 1 }}>{FormFieldRenderer}</div>
-              </Col>
-            </Row>
-            {/* 校验错误信息 */}
-            <Row>
-              <Col offset={labelSpan} span={fieldSpan}>
                 {errorMessage && (
                   <div
-                    style={{
-                      color: "#ff4d4f",
-                      fontSize: fontSize - 1,
-                    }}
+                    className="text-[#ff4d4f]"
+                    style={{ fontSize: fontSize - 1 }}
                   >
                     {errorMessage}
                   </div>
                 )}
-              </Col>
-            </Row>
-          </Col>
-        </Row>
+              </div>
+            </div>
+          </div>
+        </div>
       </React.Fragment>
     );
   }
@@ -286,22 +280,14 @@ export const withWiderLabel = (
 ) => {
   const WiderLabelFieldDisplay = React.memo(
     ({
-      displayOption,
       state,
       onChange,
     }: {
-      displayOption?: {
-        labelSpan?: number;
-        fieldSpan?: number;
-        fontSize?: number;
-        lineHeight?: number;
-      };
       state: ImmutableFormState;
       onChange: (value: FieldValue, path: FieldPath) => void;
     }) => {
       // 覆盖 labelSpan，相应调整 fieldSpan
       const adjustedDisplayOption = {
-        ...displayOption,
         labelSpan: labelSpan,
         fieldSpan: 24 - labelSpan, // 确保总和为24
         ...(fontSize !== undefined && { fontSize }), // 如果提供了 fontSize，则覆盖
@@ -362,48 +348,52 @@ const Generator = ({
   }, []);
 
   // 递归渲染字段的函数
-  const renderField = (state: ImmutableFormState): React.ReactNode => {
-    const path = state.path.slice(1); // 去掉 dummy 根节点的路径部分
+  const renderField = useCallback(
+    (state: ImmutableFormState): React.ReactNode => {
+      const path = state.path.slice(1); // 去掉 dummy 根节点的路径部分
 
-    // 如果有子节点，那么当前节点并无内容，仅渲染子节点
-    if (state.type !== "field") {
-      if (state.children.length > 0 && state.prop.visible) {
-        // 渲染所有子节点
-        const childrenNodes = state.children.map((child) => renderField(child));
+      // 如果有子节点，那么当前节点并无内容，仅渲染子节点
+      if (state.type !== "field") {
+        if (state.children.length > 0 && state.prop.visible) {
+          // 如果有自定义布局组件，使用它来包裹子节点
+          if (state.LayoutComponent) {
+            return (
+              <state.LayoutComponent
+                render={renderField}
+                key={path.join(".")}
+                state={state}
+              />
+            );
+          }
 
-        // 如果有自定义布局组件，使用它来包裹子节点
-        if (state.LayoutComponent) {
+          // 否则使用默认的 Fragment 包裹
           return (
-            <state.LayoutComponent key={path.join(".")} state={state}>
-              {childrenNodes}
-            </state.LayoutComponent>
+            <React.Fragment key={path.join(".")}>
+              {state.children.map((child) => renderField(child))}
+            </React.Fragment>
           );
+        } else {
+          return null;
         }
-
-        // 否则使用默认的 Fragment 包裹
-        return (
-          <React.Fragment key={path.join(".")}>{childrenNodes}</React.Fragment>
-        );
-      } else {
-        return null;
       }
-    }
 
-    // 直接返回 Field 组件，它会处理所有的布局和可见性逻辑
-    return !state.FieldDisplayComponent ? (
-      <DefaultFieldDisplay
-        key={path.join("/")}
-        state={state}
-        onChange={changeCallback}
-      />
-    ) : (
-      <state.FieldDisplayComponent
-        key={path.join("/")}
-        state={state}
-        onChange={changeCallback}
-      />
-    );
-  };
+      // 直接返回 Field 组件，它会处理所有的布局和可见性逻辑
+      return !state.FieldDisplayComponent ? (
+        <DefaultFieldDisplay
+          key={path.join("/")}
+          state={state}
+          onChange={changeCallback}
+        />
+      ) : (
+        <state.FieldDisplayComponent
+          key={path.join("/")}
+          state={state}
+          onChange={changeCallback}
+        />
+      );
+    },
+    [changeCallback]
+  );
 
   return (
     <>
@@ -419,7 +409,7 @@ const Generator = ({
       >
         <div>
           {
-            <Flex gap={24} vertical style={{ width: "100%" }}>
+            <Flex gap={20} vertical style={{ width: "100%" }}>
               {displayFields.map((path) => {
                 const node = findNodeByPath(state, path);
                 if (!node) {

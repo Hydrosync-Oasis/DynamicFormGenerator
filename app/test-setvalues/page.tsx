@@ -115,7 +115,9 @@ export default function TestSetValuesPage() {
               },
               validate: z
                 .string()
-                .regex(/^1[3-9]\d{9}$/, { message: "请输入有效的手机号码" })
+                .refine((v) => v === "" || /^1[3-9]\d{9}$/.test(v), {
+                  message: "请输入有效的手机号码",
+                })
                 .optional(),
             },
             {
@@ -318,6 +320,249 @@ export default function TestSetValuesPage() {
     message.warning("已填充边界值，请查看校验结果");
   };
 
+  // 测试场景8：嵌套对象中的缺失值
+  const handleMissingNestedValues = () => {
+    form.setFieldsValue({
+      username: "测试用户",
+      contact: {
+        phone: "13800138000",
+        // wechat 字段缺失，测试部分字段设置
+      },
+      hobbies: {
+        hobby1: {
+          name: "跑步",
+          // level 字段缺失，测试必填字段缺失
+        },
+        hobby2: {
+          level: "advanced",
+          // name 字段缺失
+        },
+      },
+    });
+    message.warning("场景8：已设置嵌套对象缺失值，请检查校验");
+  };
+
+  // 测试场景9：设置多余的字段（schema中不存在的字段）
+  const handleExtraFields = () => {
+    form.setFieldsValue({
+      username: "测试用户",
+      email: "test@example.com",
+      // @ts-ignore - 故意设置不存在的字段
+      nickname: "小明", // schema中不存在的字段
+      birthday: "2000-01-01", // schema中不存在的字段
+      contact: {
+        phone: "13800138000",
+        // @ts-ignore
+        qq: "123456789", // contact中不存在的字段
+      },
+      hobbies: {
+        hobby1: {
+          name: "游泳",
+          level: "intermediate",
+          // @ts-ignore
+          years: 5, // hobbies中不存在的字段
+          description: "业余爱好", // 不存在的字段
+        },
+      },
+    });
+    message.info("场景9：已设置多余字段，查看是否被忽略或报错");
+  };
+
+  // 测试场景10：空值和 null/undefined 测试
+  const handleNullAndEmptyValues = () => {
+    form.setFieldsValue({
+      username: "", // 空字符串
+      email: null as any, // null 值
+      age: undefined, // undefined 值
+      gender: "male",
+      contact: {
+        phone: "", // 空字符串
+        wechat: null as any, // null 值
+      },
+      hobbies: {
+        hobby1: {
+          name: "",
+          level: undefined as any,
+        },
+      },
+    });
+    message.warning("场景10：已设置空值/null/undefined，检查处理情况");
+  };
+
+  // 测试场景11：空对象和空数组
+  const handleEmptyObjectAndArray = () => {
+    form.setFieldsValue({
+      username: "测试用户",
+      contact: {}, // 空对象
+      hobbies: {}, // 空数组对象
+    });
+    message.info("场景11：已设置空对象和空数组");
+  };
+
+  // 测试场景12：不连续的数组索引
+  const handleNonSequentialArray = () => {
+    form.setFieldsValue({
+      username: "测试用户",
+      hobbies: {
+        hobby5: {
+          // 跳过 hobby1-4，直接从 hobby5 开始
+          name: "绘画",
+          level: "beginner",
+        },
+        hobby2: {
+          // 不按顺序
+          name: "书法",
+          level: "intermediate",
+        },
+        hobby10: {
+          // 更大的索引
+          name: "舞蹈",
+          level: "advanced",
+        },
+      },
+    });
+    message.info("场景12：已设置不连续的数组索引");
+  };
+
+  // 测试场景13：类型错误测试
+  const handleTypeErrors = () => {
+    form.setFieldsValue({
+      username: 12345 as any, // 应该是字符串，传入数字
+      email: true as any, // 应该是字符串，传入布尔值
+      age: "not-a-number", // 应该是数字，传入无法转换的字符串
+      gender: "invalid-gender" as any, // 不在枚举值中
+      contact: "should-be-object" as any, // 应该是对象，传入字符串
+      hobbies: [
+        // 应该是对象格式，传入数组格式
+        { name: "游泳", level: "intermediate" },
+        { name: "跑步", level: "beginner" },
+      ] as any,
+    });
+    message.warning("场景13：已设置类型错误的数据，检查类型处理");
+  };
+
+  // 测试场景14：深层嵌套缺失
+  const handleDeepNestedMissing = () => {
+    form.setFieldsValue({
+      username: "测试用户",
+      // contact 整个对象缺失
+      hobbies: {
+        hobby1: null as any, // 整个 hobby1 为 null
+        hobby2: {
+          name: "音乐", // 只有 name，缺少 level
+        },
+        hobby3: {
+          level: "expert", // 只有 level，缺少 name
+        },
+      },
+    });
+    message.warning("场景14：深层嵌套结构缺失，检查处理");
+  };
+
+  // 测试场景15：混合完整和不完整数据
+  const handleMixedCompleteIncomplete = () => {
+    form.setFieldsValue({
+      username: "王五",
+      email: "wangwu@example.com",
+      age: 28,
+      gender: "male",
+      country: "china",
+      address: "深圳市南山区科技园", // 完整的基础数据
+      contact: {
+        phone: "13900139000",
+        // wechat 缺失
+      },
+      hobbies: {
+        hobby1: {
+          name: "足球",
+          level: "advanced", // 完整的 hobby1
+        },
+        hobby2: {
+          name: "乒乓球",
+          // level 缺失
+        },
+        hobby3: {
+          // name 缺失
+          level: "beginner",
+        },
+        hobby4: null as any, // null 的 hobby
+        hobby5: {
+          name: "羽毛球",
+          level: "intermediate", // 完整的 hobby5
+        },
+      },
+    });
+    message.warning("场景15：混合完整和不完整数据，检查表单状态");
+  };
+
+  // 测试场景16：连续更新测试（测试缓存和性能）
+  const handleSequentialUpdates = async () => {
+    message.info("开始连续更新测试...");
+
+    // 第一次更新
+    form.setFieldsValue({ username: "更新1" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // 第二次更新
+    form.setFieldsValue({ username: "更新2", email: "update2@test.com" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // 第三次更新嵌套字段
+    form.setFieldsValue({
+      contact: { phone: "13800000001" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // 第四次更新数组
+    form.setFieldsValue({
+      hobbies: {
+        hobby1: { name: "更新的爱好", level: "expert" },
+      },
+    });
+
+    message.success("场景16：连续更新完成");
+  };
+
+  // 测试场景17：特殊字符和边界字符串
+  const handleSpecialCharacters = () => {
+    form.setFieldsValue({
+      username: "用户@#$%^&*()_+-=[]{}|;:',.<>?/`~",
+      email: "test+special@example.co.uk",
+      contact: {
+        phone: "13800138000",
+        wechat: "微信😀emoji🎉测试",
+      },
+      hobbies: {
+        hobby1: {
+          name: "爱好名称包含<script>alert('xss')</script>",
+          level: "beginner",
+        },
+        hobby2: {
+          name: "超长文本测试".repeat(50), // 超长文本
+          level: "intermediate",
+        },
+      },
+    });
+    message.info("场景17：已设置特殊字符和边界字符串");
+  };
+
+  // 测试场景18：重复键值覆盖测试
+  const handleDuplicateKeyOverride = () => {
+    form.setFieldsValue({
+      username: "第一次设置",
+      email: "first@test.com",
+    });
+
+    // 立即再次设置相同的键
+    setTimeout(() => {
+      form.setFieldsValue({
+        username: "第二次设置（应该覆盖）",
+        email: "second@test.com",
+      });
+      message.success("场景18：重复键值覆盖完成，检查最终值");
+    }, 50);
+  };
+
   // 提交表单
   const onSubmit = async () => {
     try {
@@ -334,6 +579,8 @@ export default function TestSetValuesPage() {
   const handleGetCurrentData = () => {
     const data = model.getJSONData();
     console.log("当前表单数据:", data);
+    console.log(model);
+
     message.info("当前数据已打印到控制台");
   };
 
@@ -348,16 +595,43 @@ export default function TestSetValuesPage() {
                 本页面用于测试表单生成器的 <code>setFieldsValue</code>{" "}
                 函数，涵盖以下测试场景：
               </p>
-              <ul>
-                <li>1. 填充基础数据（单层字段）</li>
-                <li>2. 填充完整数据（包括嵌套字段和数组字段）</li>
-                <li>3. 部分更新数据</li>
-                <li>4. 单独更新嵌套对象字段</li>
-                <li>4.5. 单独更新数组型嵌套字段</li>
-                <li>5. 触发联动规则（选择中国后显示地址字段）</li>
-                <li>6. 清空表单（使用 resetFields）</li>
-                <li>7. 边界值测试（触发校验错误）</li>
-              </ul>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "8px",
+                }}
+              >
+                <div>
+                  <strong>基础测试：</strong>
+                  <ul style={{ marginTop: 8 }}>
+                    <li>1. 填充基础数据（单层字段）</li>
+                    <li>2. 填充完整数据（包括嵌套字段和数组字段）</li>
+                    <li>3. 部分更新数据</li>
+                    <li>4. 单独更新嵌套对象字段</li>
+                    <li>4.5. 单独更新数组型嵌套字段</li>
+                    <li>5. 触发联动规则（选择中国后显示地址字段）</li>
+                    <li>6. 清空表单（使用 resetFields）</li>
+                    <li>7. 边界值测试（触发校验错误）</li>
+                  </ul>
+                </div>
+                <div>
+                  <strong>边界条件测试：</strong>
+                  <ul style={{ marginTop: 8 }}>
+                    <li>8. 嵌套对象中的缺失值</li>
+                    <li>9. 设置多余字段（schema不存在）</li>
+                    <li>10. 空值和 null/undefined 测试</li>
+                    <li>11. 空对象和空数组</li>
+                    <li>12. 不连续的数组索引</li>
+                    <li>13. 类型错误测试</li>
+                    <li>14. 深层嵌套缺失</li>
+                    <li>15. 混合完整和不完整数据</li>
+                    <li>16. 连续更新测试</li>
+                    <li>17. 特殊字符和边界字符串</li>
+                    <li>18. 重复键值覆盖测试</li>
+                  </ul>
+                </div>
+              </div>
             </div>
           }
           type="info"
@@ -374,7 +648,7 @@ export default function TestSetValuesPage() {
         <Divider />
 
         <div>
-          <h3 style={{ marginBottom: 16 }}>测试操作按钮</h3>
+          <h3 style={{ marginBottom: 16 }}>基础测试操作</h3>
           <Space wrap>
             <Button type="primary" onClick={handleFillBasicData}>
               场景1：填充基础数据
@@ -395,6 +669,43 @@ export default function TestSetValuesPage() {
             </Button>
             <Button onClick={handleBoundaryTest} danger>
               场景7：边界值测试
+            </Button>
+          </Space>
+
+          <h3 style={{ marginTop: 24, marginBottom: 16 }}>边界条件测试</h3>
+          <Space wrap>
+            <Button onClick={handleMissingNestedValues} type="dashed">
+              场景8：缺失值测试
+            </Button>
+            <Button onClick={handleExtraFields} type="dashed">
+              场景9：多余字段
+            </Button>
+            <Button onClick={handleNullAndEmptyValues} type="dashed">
+              场景10：空值/null/undefined
+            </Button>
+            <Button onClick={handleEmptyObjectAndArray} type="dashed">
+              场景11：空对象和数组
+            </Button>
+            <Button onClick={handleNonSequentialArray} type="dashed">
+              场景12：不连续索引
+            </Button>
+            <Button onClick={handleTypeErrors} type="dashed" danger>
+              场景13：类型错误
+            </Button>
+            <Button onClick={handleDeepNestedMissing} type="dashed">
+              场景14：深层缺失
+            </Button>
+            <Button onClick={handleMixedCompleteIncomplete} type="dashed">
+              场景15：混合数据
+            </Button>
+            <Button onClick={handleSequentialUpdates} type="dashed">
+              场景16：连续更新
+            </Button>
+            <Button onClick={handleSpecialCharacters} type="dashed">
+              场景17：特殊字符
+            </Button>
+            <Button onClick={handleDuplicateKeyOverride} type="dashed">
+              场景18：重复覆盖
             </Button>
           </Space>
         </div>

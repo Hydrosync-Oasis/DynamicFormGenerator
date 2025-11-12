@@ -80,18 +80,21 @@ export function setMutableNode(
     nodesOnPath: MutableFieldNode[],
     /**用于标记此处发生改变的函数，会对这里生成全新的不可变对象 */
     mutate: (node: MutableFieldNode) => void
-  ) => void
+  ) => void | boolean
 ) {
   const nodes = getNodesOnPath(mutableModel, path, true);
 
   if (!nodes) {
     throw new Error("this path is not found.");
   }
-  nodes?.forEach((n) => {
-    n.snapshot.dirty = true;
-  });
 
-  setter(nodes[nodes.length - 1], nodes, (node) => {
+  const shouldUpdate = setter(nodes[nodes.length - 1], nodes, (node) => {
     node.snapshot.dirty = true;
   });
+
+  if (shouldUpdate !== false) {
+    nodes?.forEach((n) => {
+      n.snapshot.dirty = true;
+    });
+  }
 }
