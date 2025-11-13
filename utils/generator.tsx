@@ -73,7 +73,7 @@ const useDynamicForm = (model: FormModel) => {
     };
 
     return hook;
-  }, []);
+  }, [model]);
 };
 
 /**
@@ -336,16 +336,23 @@ const Generator = ({
     model.getSnapshot.bind(model)
   );
   // 处理字段值变化的回调
-  const handleChange = (value: FieldValue, path: FieldPath) => {
+  const handleChange = (
+    model: FormModel,
+    value: FieldValue,
+    path: FieldPath
+  ) => {
     model.setValue(path, value, { invokeOnChange: true }, true);
     // 可选：实时验证
     model.validateField(path, true).catch(() => {
       // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
     });
   };
-  const changeCallback = useCallback((value: FieldValue, path: FieldPath) => {
-    handleChange(value, path);
-  }, []);
+  const changeCallback = useCallback(
+    (value: FieldValue, path: FieldPath) => {
+      handleChange(model, value, path);
+    },
+    [model]
+  );
 
   // 递归渲染字段的函数
   const renderField = useCallback(

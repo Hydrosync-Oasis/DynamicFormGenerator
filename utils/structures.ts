@@ -380,7 +380,6 @@ class FormModel {
     if (shouldNotify) {
       this.notify();
     }
-    // console.log(this.mutableDataSource);
   }
 
   setValue(
@@ -786,6 +785,7 @@ class FormModel {
     path: FieldPath,
     key: FieldKey,
     value: any,
+    shouldTriggerRule: boolean = true,
     shouldNotify: boolean = false
   ) {
     const node = this.findNodeByPath(path);
@@ -816,7 +816,12 @@ class FormModel {
         throw new Error("the node is not found: " + path + ", key: " + key);
       } else {
         // key 存在，使用 setValues 更新该元素
-        this.setValues(path, { [key]: value }, { invokeEffect: true }, false);
+        this.setValues(
+          path,
+          { [key]: value },
+          { invokeEffect: shouldTriggerRule },
+          false
+        );
       }
     }
 
@@ -934,6 +939,13 @@ class FormModel {
     const set = node.effect;
     if (!set) return;
     this.runEffects(set, cause, { changedPath: depFieldPath });
+
+    // 如果节点有 rootArrayField，也触发它上面的 Effect
+    if (node.rootArrayField && node.rootArrayField.effect) {
+      this.runEffects(node.rootArrayField.effect, cause, {
+        changedPath: depFieldPath,
+      });
+    }
   }
 
   /**
