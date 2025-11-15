@@ -402,21 +402,23 @@ const Generator = ({
     [changeCallback]
   );
 
+  const theme = useMemo(() => {
+    return {
+      components: {
+        Alert: {
+          defaultPadding: "2px 7px",
+        },
+      },
+      token: { borderRadiusLG: 3, borderRadius: 2 },
+    };
+  }, []);
+
   return (
     <>
-      <ConfigProvider
-        theme={{
-          components: {
-            Alert: {
-              defaultPadding: "2px 7px",
-            },
-          },
-          token: { borderRadiusLG: 3, borderRadius: 2 },
-        }}
-      >
+      <ConfigProvider theme={theme}>
         <div>
           {
-            <Flex gap={20} vertical style={{ width: "100%" }}>
+            <div className="flex flex-col gap-5 w-full">
               {displayFields.map((path) => {
                 const node = findNodeByPath(state, path);
                 if (!node) {
@@ -425,7 +427,7 @@ const Generator = ({
                 }
                 return renderField(node);
               })}
-            </Flex>
+            </div>
           }
         </div>
       </ConfigProvider>

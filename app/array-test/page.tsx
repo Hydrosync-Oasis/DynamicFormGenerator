@@ -32,47 +32,69 @@ export default function ArrayTestPage() {
   const WiderLabelField = withWiderLabel(DefaultFieldDisplay);
 
   // 定义数组外层的Flex布局组件
-  const ServersFlexLayout = ({ children }: any) => {
-    return (
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 16,
-          marginTop: 8,
-        }}
-      >
-        {children}
-      </div>
-    );
-  };
+  const ServersFlexLayout = React.memo(
+    ({
+      render,
+      state,
+    }: {
+      render: (state: any) => React.ReactNode;
+      state: any;
+    }) => {
+      return (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 16,
+            marginTop: 8,
+          }}
+        >
+          {state.children.map((child: any) => render(child))}
+        </div>
+      );
+    }
+  );
+
+  ServersFlexLayout.displayName = "ServersFlexLayout";
 
   // 定义服务器卡片布局组件
-  const ServerCardLayout = ({ children, state }: any) => {
-    // 从state中获取当前路径的IP地址（作为标题）
-    const path = state.path as FieldPath;
-    const ipAddress = path[path.length - 1]; // 数组项的key就是IP地址
+  const ServerCardLayout = React.memo(
+    ({
+      render,
+      state,
+    }: {
+      render: (state: any) => React.ReactNode;
+      state: any;
+    }) => {
+      // 从state中获取当前路径的IP地址（作为标题）
+      console.log(state);
 
-    return (
-      <Card
-        size="small"
-        title={`服务器配置 - ${ipAddress}`}
-        style={{
-          width: 320,
-          flexShrink: 0,
-        }}
-        headStyle={{
-          backgroundColor: "#f5f5f5",
-          minHeight: 36,
-          fontSize: 14,
-          fontWeight: 500,
-        }}
-        bodyStyle={{ padding: "12px 16px" }}
-      >
-        {children}
-      </Card>
-    );
-  };
+      const path = state.path as FieldPath;
+      const ipAddress = path[path.length - 1]; // 数组项的key就是IP地址
+
+      return (
+        <Card
+          size="small"
+          title={`服务器配置 - ${ipAddress}`}
+          style={{
+            width: 320,
+            flexShrink: 0,
+          }}
+          headStyle={{
+            backgroundColor: "#f5f5f5",
+            minHeight: 36,
+            fontSize: 14,
+            fontWeight: 500,
+          }}
+          bodyStyle={{ padding: "12px 16px" }}
+        >
+          {state.children.map((child: any) => render(child))}
+        </Card>
+      );
+    }
+  );
+
+  ServerCardLayout.displayName = "ServerCardLayout";
 
   // 定义表单 schema
   const schema = useMemo(
@@ -423,65 +445,50 @@ export default function ArrayTestPage() {
     // 注册联动规则3：当 servers 变化时，更新虚拟字段 serversMemory
     model.registerRule((ctx, cause) => {
       const servers = ctx.get(["servers"], true) || {};
-      const currentMemory = ctx.get(["serversMemory"], false) || {};
-
-      // 将 servers 和 currentMemory 取并集，servers 的值优先
-      const newMemory: Record<string, any> = { ...currentMemory };
-      Object.keys(servers).forEach((key) => {
-        newMemory[key] = { ...newMemory[key], ...servers[key] };
-      });
 
       // 更新虚拟字段
-      ctx.setArray(["serversMemory"], newMemory, { shouldTriggerRule: true });
+      model.setValues(["serversMemory"], servers, { invokeEffect: true });
     });
 
     // 注册联动规则4：当 servers2 变化时，更新虚拟字段 serversMemory
     model.registerRule((ctx, cause) => {
       const servers2 = ctx.get(["servers2"], true) || {};
-      const currentMemory = ctx.get(["serversMemory"], false) || {};
 
-      // 将 servers2 和 currentMemory 取并集，servers2 的值优先
-      const newMemory: Record<string, any> = { ...currentMemory };
-      Object.keys(servers2).forEach((key) => {
-        newMemory[key] = { ...newMemory[key], ...servers2[key] };
-      });
-
-      // 更新虚拟字段
-      ctx.setArray(["serversMemory"], newMemory, { shouldTriggerRule: true });
+      // 更新虚拟字段（完整数据，会自动合并）
+      model.setValues(["serversMemory"], servers2, { invokeEffect: true });
     });
 
     // 注册联动规则5：当虚拟字段 serversMemory 变化时，同步到 servers 和 servers2
     model.registerRule((ctx, cause) => {
-      const memory = ctx.get(["serversMemory"], true) || {};
-      const servers = ctx.get(["servers"], false) || {};
-      const servers2 = ctx.get(["servers2"], false) || {};
+      const total = ctx.get(["serversMemory"], true) || {};
 
-      // 同步到 servers（只更新同key的项）
-      const newServers = { ...servers };
-      let serversChanged = false;
-      Object.keys(memory).forEach((key) => {
-        if (newServers[key]) {
-          newServers[key] = { ...newServers[key], ...memory[key] };
-          serversChanged = true;
+      // 获取 servers 和 servers2 的当前值（不作为依赖项）
+      const currentServers = ctx.get(["servers"], false) || {};
+      const currentServers2 = ctx.get(["servers2"], false) || {};
+
+      // 从 total 中过滤出 servers 拥有的 key
+      const serversKeys = Object.keys(currentServers);
+      const newServers: Record<string, any> = {};
+      serversKeys.forEach((key) => {
+        if (total[key]) {
+          newServers[key] = total[key];
         }
       });
-      if (serversChanged) {
-        ctx.setArray(["servers"], newServers, { shouldTriggerRule: false });
-      }
 
-      // 同步到 servers2（只更新同key的项，只取需要的字段）
-      const newServers2 = { ...servers2 };
-      let servers2Changed = false;
-      Object.keys(memory).forEach((key) => {
-        if (newServers2[key]) {
-          const { serverName, port } = memory[key];
-          newServers2[key] = { ...newServers2[key], serverName, port };
-          servers2Changed = true;
+      // 从 total 中过滤出 servers2 拥有的 key（完整数据，setValues会自动忽略schema中不存在的字段）
+      const servers2Keys = Object.keys(currentServers2);
+      const newServers2: Record<string, any> = {};
+      servers2Keys.forEach((key) => {
+        if (total[key]) {
+          newServers2[key] = total[key];
         }
       });
-      if (servers2Changed) {
-        ctx.setArray(["servers2"], newServers2, { shouldTriggerRule: false });
-      }
+
+      // 同步到 servers（setValues会自动处理字段过滤）
+      model.setValues(["servers"], newServers, { invokeEffect: false });
+
+      // 同步到 servers2（setValues会自动忽略protocol和sslCertPath字段）
+      model.setValues(["servers2"], newServers2, { invokeEffect: false });
     });
 
     model.initial();

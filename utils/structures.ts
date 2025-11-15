@@ -369,17 +369,20 @@ class FormModel {
 
   setVisible(path: FieldPath, visible: boolean, shouldNotify = false) {
     setMutableNode(this.mutableDataSource, path, (node) => {
+      if (Object.is(node.dynamicProp.visible, visible)) {
+        return false;
+      }
       node.dynamicProp.visible = visible;
       this.validatorCacheManager.updateNode(node);
       this.plainCacheManager.updateNode(node);
+
+      this.validatorCacheManager.rebuild();
+      this.plainCacheManager.rebuild();
+
+      if (shouldNotify) {
+        this.notify();
+      }
     });
-
-    this.validatorCacheManager.rebuild();
-    this.plainCacheManager.rebuild();
-
-    if (shouldNotify) {
-      this.notify();
-    }
   }
 
   setValue(
@@ -395,34 +398,31 @@ class FormModel {
       const invokeOnChange = option?.invokeOnChange;
       const invokeEffect = option?.invokeEffect ?? true;
 
-      if (node.type === "object") {
+      if (node.type !== "field") {
         throw new Error("the field is not leaf-node:" + path);
       }
       if (!node.dynamicProp) {
         return;
       }
 
+      if (Object.is(node.dynamicProp.value, value)) {
+        return;
+      }
+
       // 判断是否是在数组嵌套字段内部
       if (nodes.some((x) => x.type === "array")) {
-        if (node.type === "array") {
-          throw new Error("please use updateChildren to set array field value");
-        } else {
-          if (Object.is(node.dynamicProp.value, value)) {
-            return;
-          }
-          node.dynamicProp.value = value;
-          // 值变更后，标记缓存
-          this.plainCacheManager.updateNode(node);
+        node.dynamicProp.value = value;
+        // 值变更后，标记缓存
+        this.plainCacheManager.updateNode(node);
 
-          // 值变化后，触发依赖该字段的规则
-          const root = node.rootArrayField;
-          if (root && invokeEffect) {
-            this.runEffects(
-              root.effect || new Set<ReactiveEffect>(),
-              "value-changed",
-              { changedPath: path }
-            );
-          }
+        // 值变化后，触发依赖该字段的规则
+        const root = node.rootArrayField;
+        if (root && invokeEffect) {
+          this.runEffects(
+            root.effect || new Set<ReactiveEffect>(),
+            "value-changed",
+            { changedPath: path }
+          );
         }
       } else {
         if (node.type !== "field") {
@@ -834,9 +834,7 @@ class FormModel {
   }
 
   getSnapshot(): ImmutableFormState {
-    const res = mutableNodeToImmutableNode(this.mutableDataSource);
-    // this.currentVersion++;
-    return res;
+    return mutableNodeToImmutableNode(this.mutableDataSource);
   }
 
   /** 注册规则 */
