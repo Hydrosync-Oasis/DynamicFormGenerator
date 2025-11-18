@@ -10,24 +10,22 @@ import {
   DefaultFieldDisplay,
 } from "../../utils/generator";
 import type { FieldSchema, FieldPath } from "../../utils/structures";
-
+// HOC：创建标签更宽的Field组件
+const withWiderLabel = (WrappedComponent: any) => {
+  return React.memo((props: any) => {
+    return (
+      <WrappedComponent
+        {...props}
+        displayOption={{
+          ...props.displayOption,
+          labelSpan: 10,
+          fieldSpan: 14,
+        }}
+      />
+    );
+  });
+};
 export default function ArrayTestPage() {
-  // HOC：创建标签更宽的Field组件
-  const withWiderLabel = (WrappedComponent: any) => {
-    return (props: any) => {
-      return (
-        <WrappedComponent
-          {...props}
-          displayOption={{
-            ...props.displayOption,
-            labelSpan: 10,
-            fieldSpan: 14,
-          }}
-        />
-      );
-    };
-  };
-
   // 使用HOC创建标签更宽的Field组件
   const WiderLabelField = withWiderLabel(DefaultFieldDisplay);
 

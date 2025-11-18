@@ -41,6 +41,7 @@ export default function PerfArrayPage() {
     model.setArray(["items"], data);
     console.timeEnd("setArray(100)");
     model.initial();
+    console.log(model);
   }, [model]);
 
   // 4) 展示字段顺序
@@ -77,12 +78,7 @@ export default function PerfArrayPage() {
   return (
     <div className="p-6">
       <Card title="性能测试：数组型字段 x100" bordered>
-        <Generator
-          model={model}
-          size="normal"
-          displayFields={displayFields}
-          displayOption={{ labelSpan: 4, fieldSpan: 20, showDebug: false }}
-        />
+        <Generator model={model} displayFields={displayFields} />
         <Divider />
         <Space>
           <Button type="primary" onClick={onSubmit}>
