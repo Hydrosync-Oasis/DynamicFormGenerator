@@ -79,7 +79,7 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
         dirty: true,
       },
       effect: new Set(),
-      cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
+      cache: { plainObj: { type: "dirty" }, validator: "dirty" },
     };
   } else if ("isArray" in item && !item.isArray) {
     return {
@@ -94,7 +94,7 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
         dirty: true,
       },
       children: [],
-      cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
+      cache: { plainObj: { type: "dirty" }, validator: "dirty" },
     };
   } else {
     return {
@@ -104,7 +104,12 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       dynamicProp: {
         value: item.defaultValue,
         visible: item.initialVisible ?? true,
-        validation: item.validate || z.unknown(),
+        validation:
+          item.validate instanceof ZodType
+            ? {
+                onChange: item.validate || z.unknown(),
+              }
+            : item.validate || { onChange: z.unknown() },
         controlProp: item.controlProps,
       },
       staticProp: {
@@ -118,7 +123,7 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
         dirty: true,
       },
       effect: new Set(),
-      cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
+      cache: { plainObj: { type: "dirty" }, validator: "dirty" },
     };
   }
 }
@@ -280,7 +285,7 @@ class FormModel {
       dynamicProp: { visible: true },
       staticProp: {},
       snapshot: { dirty: true },
-      cache: { plainObj: { type: "dirty" }, validator: { type: "dirty" } },
+      cache: { plainObj: { type: "dirty" }, validator: "dirty" },
     };
 
     // 复制结点，从原始数据到内部带有State和Schema的结构化数据
@@ -569,7 +574,8 @@ class FormModel {
   setValidation(
     path: FieldPath,
     validator: z.ZodType,
-    shouldNotify: boolean = false
+    shouldNotify: boolean = false,
+    ruleSet: string = "onChange"
   ) {
     const node = this.findNodeByPath(path);
     if (!node) {
@@ -579,16 +585,25 @@ class FormModel {
       throw new Error("the field is not leaf-node:" + path);
     }
 
+    if (ruleSet !== "onChange") {
+      node.dynamicProp.validation["onChange"] = validator;
+      this.validatorCacheManager.updateNode(node, ruleSet);
+      return;
+    }
+
     // 检查新旧 validator 的 isOptional 状态是否不同
-    const oldIsOptional = node.dynamicProp.validation?.isOptional() ?? false;
+    // TODO
+    // 目前只能检测 onChange 的 isOptional 状态变化
+    const oldIsOptional =
+      node.dynamicProp.validation["onChange"]?.isOptional() ?? false;
     const newIsOptional = validator.isOptional();
 
     if (oldIsOptional !== newIsOptional) {
       // 如果 isOptional 状态改变，使用 setMutableNode 通知变更
       setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
         if (node.type === "field") {
-          node.dynamicProp.validation = validator;
-          this.validatorCacheManager.updateNode(node);
+          node.dynamicProp.validation[ruleSet] = validator;
+          this.validatorCacheManager.updateNode(node, ruleSet);
           update(node);
         }
       });
@@ -597,12 +612,16 @@ class FormModel {
       }
     } else {
       // 如果 isOptional 状态未改变，直接更新
-      node.dynamicProp.validation = validator;
-      this.validatorCacheManager.updateNode(node);
+      node.dynamicProp.validation[ruleSet] = validator;
+      this.validatorCacheManager.updateNode(node, ruleSet);
     }
   }
 
-  setRefiner(path: FieldPath, refiner: (z: ZodType) => ZodType) {
+  setRefiner(
+    path: FieldPath,
+    refiner: (z: ZodType) => ZodType,
+    ruleSet: string = "onChange"
+  ) {
     const node = this.findNodeByPath(path);
     if (!node) {
       throw new Error("the field is not found:" + path);
@@ -611,8 +630,12 @@ class FormModel {
       throw new Error("the field is a leaf-node:" + path);
     }
 
-    node.dynamicProp.validationRefine = refiner;
-    this.validatorCacheManager.updateNode(node);
+    if (node.dynamicProp.validationRefine === undefined) {
+      node.dynamicProp.validationRefine = {};
+    }
+
+    node.dynamicProp.validationRefine[ruleSet] = refiner;
+    this.validatorCacheManager.updateNode(node, ruleSet);
   }
 
   getNodesOnPath(path: FieldPath, containsRoot?: boolean) {
@@ -677,7 +700,7 @@ class FormModel {
   setArray(
     path: FieldPath,
     value: Record<string, any>,
-    option?: { shouldTriggerRule?: boolean },
+    option?: { invokeEffect?: boolean },
     shouldNotify: boolean = false
   ) {
     const node = this.findNodeByPath(path);
@@ -709,7 +732,7 @@ class FormModel {
     this.plainCacheManager.updateNode(node);
     this.validatorCacheManager.updateNode(node);
 
-    if (option?.shouldTriggerRule) {
+    if (option?.invokeEffect) {
       this.triggerEffectsFor(path, "children-updated");
     }
 
@@ -852,6 +875,7 @@ class FormModel {
         },
         setVisible: () => void 0,
         setValue: () => void 0,
+        setValues: () => void 0,
         setValidation: () => void 0,
         setArray: () => void 0,
         setAlertTip: () => void 0,
@@ -909,6 +933,9 @@ class FormModel {
           get: (k, _isDependency?: boolean) => this.get(k, "value"),
           setVisible: (path, visible) => this.setVisible(path, visible),
           setValue: (path, value, option) => this.setValue(path, value, option),
+          setValues: (path, values, option) => {
+            this.setValues(path, values, option);
+          },
           setValidation: (path, validator) =>
             this.setValidation(path, validator as any),
           setArray: (path, chilren, option) => {
@@ -1016,7 +1043,8 @@ class FormModel {
   validateField(
     path: FieldPath,
     enableEnhancer?: boolean,
-    shouldNotify: boolean = false
+    shouldNotify: boolean = false,
+    ruleSet: string = "onChange"
   ): Promise<any> {
     // 在校验前先收集最终对象
     this.plainCacheManager.rebuild();
@@ -1026,7 +1054,7 @@ class FormModel {
       setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
         if (node.type === "field") {
           // 单字段校验
-          const res = node.dynamicProp.validation?.safeParse(
+          const res = node.dynamicProp.validation?.[ruleSet]?.safeParse(
             node.dynamicProp.value
           );
           if (res?.success) {
@@ -1037,7 +1065,10 @@ class FormModel {
             finalError = res?.error;
           }
         } else {
-          const validation = node.cache.validator;
+          if (node.cache.validator === "dirty") {
+            throw new Error("dirty value");
+          }
+          const validation = node.cache.validator[ruleSet];
           const plainObj = node.cache.plainObj;
           if (validation.type === "hasValue" && plainObj.type === "hasValue") {
             // 校验全对象
@@ -1083,7 +1114,11 @@ class FormModel {
     } else {
       // 从根部校验
       const value = this.mutableDataSource.cache.plainObj;
-      const validation = this.mutableDataSource.cache.validator;
+      const validator = this.mutableDataSource.cache.validator;
+      if (validator === "dirty" || value.type === "dirty") {
+        throw new Error("dirty value");
+      }
+      const validation = validator[ruleSet];
       if (value.type === "hasValue" && validation.type === "hasValue") {
         const res = validation.validator.safeParse(value.objectOnly);
         const info = res.success
@@ -1120,7 +1155,7 @@ class FormModel {
         if (!res.success && info && info.length > 0) {
           finalError = new ZodError(info);
         }
-      } else if (value.type === "dirty" || validation.type === "dirty") {
+      } else {
         throw new Error("dirty value");
       }
     }

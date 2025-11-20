@@ -30,7 +30,7 @@ export function mutableNodeToImmutableNode(
         required:
           sourceNode.dynamicProp.validation === undefined
             ? false
-            : !sourceNode.dynamicProp.validation.isOptional(),
+            : !sourceNode.dynamicProp.validation["onChange"].isOptional(),
       },
       FieldDisplayComponent: sourceNode.staticProp.FieldDisplayComponent,
     };

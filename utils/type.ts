@@ -39,11 +39,19 @@ export type ReactiveEffectContext = {
     value: FieldValue,
     option?: { invokeOnChange?: boolean; invokeEffect?: boolean }
   ) => void;
-  setValidation: (path: FieldPath, validator: ZodType) => void;
+  setValues: (
+    path: FieldPath,
+    values: Record<string, FieldValue>,
+    option: {
+      invokeOnChange?: boolean;
+      invokeEffect?: boolean;
+    }
+  ) => void;
+  setValidation: (path: FieldPath, validator: ZodType, ruleSet: string) => void;
   setArray: (
     path: FieldPath,
     value: Record<string, any>,
-    option?: { shouldTriggerRule?: boolean }
+    option?: { invokeEffect?: boolean }
   ) => void;
   setAlertTip: (path: FieldPath, content: React.ReactNode) => void;
   setItemProp: (path: FieldPath, propName: string, propValue: any) => void;
@@ -131,7 +139,13 @@ export type FieldSchema =
       key: FieldKey;
       label: string;
       control?: ControlType;
-      validate?: ZodType;
+      validate?:
+        | ZodType
+        | {
+            onChange?: ZodType;
+            onBlur?: ZodType;
+            onSubmit?: ZodType;
+          };
       initialVisible?: boolean;
       controlProps?: Record<string, unknown>;
       defaultValue?: FieldValue;
@@ -170,7 +184,9 @@ export interface LeafDynamicProp {
   visible: boolean; // 是否显示，响应式触发
   alertTip?: React.ReactNode;
   errorMessage?: string;
-  validation?: ZodType; // 响应式校验规则
+  validation: {
+    [ruleSet: string]: ZodType;
+  }; // 响应式校验规则
   controlProp: Record<string, any> | undefined;
 }
 
@@ -193,7 +209,7 @@ export interface NestedFieldStaticProp {
 }
 
 export interface NestedFieldDynamicProp {
-  validationRefine?: (z: ZodType) => ZodType;
+  validationRefine?: { [ruleSet: string]: (z: ZodType) => ZodType };
   visible: boolean;
 }
 
@@ -240,16 +256,22 @@ export type NodeCache = {
     | {
         type: "dirty";
       };
+  // dirty代表不知道有哪些规则集，必须遍历所有子节点收集规则集
   validator:
+    | "dirty"
     | {
-        type: "dirty";
-      }
-    | {
-        type: "hidden";
-      }
-    | {
-        type: "hasValue";
-        validator: ZodType;
+        [ruleSet: string]:
+          | {
+              // 此处的dirty代表此规则集的校验对象缓存是脏的，需要重新生成
+              type: "dirty";
+            }
+          | {
+              type: "hidden";
+            }
+          | {
+              type: "hasValue";
+              validator: ZodType;
+            };
       };
 };
 
