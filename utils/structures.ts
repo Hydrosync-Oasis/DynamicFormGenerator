@@ -1019,6 +1019,48 @@ class FormModel {
     return this.plainCacheManager.getFinalPlainObject() ?? {};
   }
 
+  getJSONDataByPath(path: FieldPath[]): any {
+    this.plainCacheManager.rebuild();
+    const set = new Set<string>(
+      path.map((p) => JSON.stringify(["dummy", ...p]))
+    );
+
+    const dfs = (node: MutableFieldNode): any => {
+      const toString = JSON.stringify(node.path);
+      if (set.has(toString)) {
+        return node.cache.plainObj.type === "hasValue"
+          ? node.cache.plainObj.submitData
+          : undefined;
+      }
+
+      if (node.dynamicProp.visible === false) {
+        return undefined;
+      }
+
+      if (node.type === "object") {
+        const res: Record<string, any> = {};
+        for (let child of node.children) {
+          const childRes = dfs(child);
+          if (childRes) {
+            res[child.key] = childRes;
+          }
+        }
+        return Object.keys(res).length > 0 ? res : undefined;
+      } else if (node.type === "array") {
+        const res: any[] = [];
+        for (let child of node.children) {
+          const childRes = dfs(child);
+          if (childRes) {
+            res.push(childRes);
+          }
+        }
+        return res.length > 0 ? res : undefined;
+      }
+    };
+
+    return dfs(this.mutableDataSource);
+  }
+
   /** 校验指定路径，校验时自动带上父字段上定义的enhancer，所以可跨字段校验 */
   async validateFields(
     pathargs: FieldPath[],
