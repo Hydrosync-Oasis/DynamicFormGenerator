@@ -183,7 +183,7 @@ export default function TestSetValuesPage() {
   // 注册联动规则：当选择中国时显示详细地址
   useEffect(() => {
     const stop = model.registerRule((ctx) => {
-      const country = ctx.get(["country"]);
+      const country = ctx.track(["country"]);
       const shouldShowAddress = country === "china";
 
       ctx.setVisible(["address"], shouldShowAddress);

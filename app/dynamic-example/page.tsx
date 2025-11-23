@@ -94,7 +94,7 @@ export default function DynamicExamplePage() {
     );
 
     const stop = model.registerRule((ctx) => {
-      const userType = ctx.get(["userType"]);
+      const userType = ctx.track(["userType"]);
       // 条件显示：企业显示公司名
       ctx.setVisible(["companyName"], userType === "company");
       // 动态 required：切换字段校验（用于 Required 星标与即时校验）

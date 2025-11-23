@@ -1,6 +1,5 @@
 // ----------------------------- 内部模型层 -----------------------------
 import { z, ZodType, ZodError } from "zod";
-import { ComponentType } from "react";
 import { mutableNodeToImmutableNode, setMutableNode } from "./immutableHelper";
 import { PlainObjectCacheManager } from "./plainObjectCacheManager";
 import { ValidatorCacheManager } from "./validatorCacheManager";
@@ -10,7 +9,6 @@ import {
   LeafDynamicProp,
   FieldPath,
   MutableFieldNode,
-  FieldType,
   FieldKey,
   ControlType,
   ImmutableFormState,
@@ -18,9 +16,9 @@ import {
   ReactiveEffect,
   ReactiveEffectContext,
   ReactiveRule,
+  FormCommands,
 } from "./type";
 import { isChildNode, isSamePath } from "./helper";
-import { NextDataPathnameNormalizer } from "next/dist/server/future/normalizers/request/next-data";
 
 type FieldProp = {
   children: FieldSchema[];
@@ -110,6 +108,7 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
                 onChange: item.validate || z.unknown(),
               }
             : item.validate || { onChange: z.unknown() },
+        required: true,
         controlProp: item.controlProps,
       },
       staticProp: {
@@ -274,6 +273,35 @@ class FormModel {
 
   public onChange?: (path: FieldPath, value: FieldValue) => void;
 
+  public formCommands: FormCommands = {
+    getValue: (path: FieldPath) => this.get(path, "value"),
+    setValue: (path: FieldPath, value: FieldValue, option?) =>
+      this.setValue(path, value, option, true),
+    setValues: (path: FieldPath, values: Record<string, any>, option?) =>
+      this.setValues(path, values, option, true),
+    setVisible: (path: FieldPath, visible: boolean) =>
+      this.setVisible(path, visible, true),
+    setAlertTip: (path: FieldPath, alertTip: React.ReactNode) =>
+      this.setAlertTip(path, alertTip, true),
+    resetFields: (path?: FieldPath) => this.resetFields(path),
+    setValidation: (path: FieldPath, validator: ZodType, ruleSet?: string) =>
+      this.setValidation(path, validator, true, ruleSet ?? "onChange"),
+    setArray: (path: FieldPath, children: Record<string, any>, option?) =>
+      this.setArray(path, children, option, true),
+    insertIntoArray: (
+      path: FieldPath,
+      value: Record<string, any>,
+      position: "before" | "after"
+    ) => this.insertIntoArray(path, value, position),
+    setControlProp: (path: FieldPath, propName: string, propValue: any) =>
+      this.setControlProp(path, propName, propValue, true),
+    validateField: (
+      path: FieldPath,
+      enableEnhancer: boolean,
+      ruleSet?: string
+    ) => this.validateField(path, enableEnhancer, ruleSet, true),
+  };
+
   constructor(schema: FormSchema) {
     // schema是一个递归结构，接下来将schema转换为stateStructure
     // 此处使用虚拟根结点，用于简化代码，这样就不需要手动复制树的第一层了
@@ -366,6 +394,10 @@ class FormModel {
     } else if (node.type === "field") {
       return node.dynamicProp[prop];
     } else {
+      if (prop === "visible") {
+        const nodes = getNodesOnPath(this.mutableDataSource, path, true);
+        return nodes!.every((n) => n.dynamicProp.visible) ?? false;
+      }
       throw new Error(
         `cannot get ${prop} from non-leaf node: ` + path.join(".")
       );
@@ -411,7 +443,7 @@ class FormModel {
       }
 
       if (Object.is(node.dynamicProp.value, value)) {
-        return;
+        return false;
       }
 
       // 判断是否是在数组嵌套字段内部
@@ -432,9 +464,6 @@ class FormModel {
       } else {
         if (node.type !== "field") {
           throw new Error("the field is not leaf-node:" + path);
-        }
-        if (Object.is(node.dynamicProp.value, value)) {
-          return;
         }
         (node as MutableFieldNode & { type: "field" }).dynamicProp.value =
           value;
@@ -591,29 +620,27 @@ class FormModel {
       return;
     }
 
-    // 检查新旧 validator 的 isOptional 状态是否不同
     // TODO
-    // 目前只能检测 onChange 的 isOptional 状态变化
-    const oldIsOptional =
-      node.dynamicProp.validation["onChange"]?.isOptional() ?? false;
-    const newIsOptional = validator.isOptional();
-
-    if (oldIsOptional !== newIsOptional) {
-      // 如果 isOptional 状态改变，使用 setMutableNode 通知变更
-      setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
-        if (node.type === "field") {
-          node.dynamicProp.validation[ruleSet] = validator;
-          this.validatorCacheManager.updateNode(node, ruleSet);
-          update(node);
-        }
-      });
-      if (shouldNotify) {
-        this.notify();
+    setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+      if (node.type === "field") {
+        node.dynamicProp.validation[ruleSet] = validator;
+        this.validatorCacheManager.updateNode(node, ruleSet);
+        update(node);
+      } else {
+        return false;
       }
-    } else {
-      // 如果 isOptional 状态未改变，直接更新
-      node.dynamicProp.validation[ruleSet] = validator;
-      this.validatorCacheManager.updateNode(node, ruleSet);
+
+      // 检查新旧 validator 的 isOptional 状态是否不同
+      const oldRequired = node.dynamicProp.required;
+      const newRequired = Object.entries(node.dynamicProp.validation).some(
+        ([k, v]) => !v.isOptional()
+      );
+      // 如果 isOptional 状态改变，标记脏
+      node.dynamicProp.required = newRequired;
+      return oldRequired !== newRequired;
+    });
+    if (shouldNotify) {
+      this.notify();
     }
   }
 
@@ -658,7 +685,7 @@ class FormModel {
     }
   }
 
-  setItemsProp(
+  setControlProp(
     path: FieldPath,
     propName: string,
     propValue: any,
@@ -866,21 +893,20 @@ class FormModel {
     const deps: FieldPath[] = [];
     effect(
       {
-        get: (path: FieldPath, isDependency: boolean = true) => {
-          if (isDependency) deps.push(path);
-
-          // During dependency collection we don't need the concrete value
-          // and we must satisfy the return type
-          return undefined as any;
+        track: (path: FieldPath) => {
+          void deps.push(path);
         },
+        getValue: () => void 0,
         setVisible: () => void 0,
         setValue: () => void 0,
         setValues: () => void 0,
         setValidation: () => void 0,
         setArray: () => void 0,
         setAlertTip: () => void 0,
-        setItemProp: () => void 0,
+        setControlProp: () => void 0,
+        resetFields: () => void 0,
         insertIntoArray: () => void 0,
+        validateField: () => Promise.resolve(),
       },
       "dependencies-collecting"
     );
@@ -930,14 +956,16 @@ class FormModel {
     for (const effect of effects) {
       effect(
         {
-          get: (k, _isDependency?: boolean) => this.get(k, "value"),
+          track: (path) => this.get(path, "value"),
+          getValue: (k) => this.get(k, "value"),
           setVisible: (path, visible) => this.setVisible(path, visible),
           setValue: (path, value, option) => this.setValue(path, value, option),
           setValues: (path, values, option) => {
             this.setValues(path, values, option);
           },
-          setValidation: (path, validator) =>
-            this.setValidation(path, validator as any),
+          resetFields: (path) => this.resetFields(path),
+          setValidation: (path, validator, ruleSet) =>
+            this.setValidation(path, validator as any, false, ruleSet),
           setArray: (path, chilren, option) => {
             this.setArray(path, chilren, option);
           },
@@ -945,8 +973,9 @@ class FormModel {
           setAlertTip: (path, content) => this.setAlertTip(path, content),
           insertIntoArray: (path, value, position) =>
             this.insertIntoArray(path, value, position),
-          setItemProp: (path, propName, propValue) =>
-            this.setItemsProp(path, propName, propValue),
+          setControlProp: (path, propName, propValue) =>
+            this.setControlProp(path, propName, propValue),
+          validateField: (path, ruleSet) => this.validateField(path, ruleSet),
         },
         cause,
         info
@@ -1085,9 +1114,12 @@ class FormModel {
   validateField(
     path: FieldPath,
     enableEnhancer?: boolean,
-    shouldNotify: boolean = false,
-    ruleSet: string = "onChange"
+    ruleSet: string = "onChange",
+    shouldNotify: boolean = false
   ): Promise<any> {
+    if (this.get(path, "visible") === false) {
+      return Promise.resolve();
+    }
     // 在校验前先收集最终对象
     this.plainCacheManager.rebuild();
     this.validatorCacheManager.rebuild();
@@ -1095,8 +1127,13 @@ class FormModel {
     if (!enableEnhancer) {
       setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
         if (node.type === "field") {
+          if (node.dynamicProp.validation[ruleSet] === undefined) {
+            // 没有校验器，直接返回
+            node.dynamicProp.errorMessage = undefined;
+            return;
+          }
           // 单字段校验
-          const res = node.dynamicProp.validation?.[ruleSet]?.safeParse(
+          const res = node.dynamicProp.validation[ruleSet]?.safeParse(
             node.dynamicProp.value
           );
           if (res?.success) {

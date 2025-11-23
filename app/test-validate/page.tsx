@@ -12,7 +12,7 @@ function buildTestSchema(): FormSchema {
   const fields: FieldSchema[] = [
     {
       key: "user",
-      label: "用户信息",
+      isArray: false,
       childrenFields: [
         {
           key: "name",
@@ -36,7 +36,7 @@ function buildTestSchema(): FormSchema {
     },
     {
       key: "address",
-      label: "地址信息",
+      isArray: false,
       childrenFields: [
         {
           key: "city",
@@ -105,6 +105,7 @@ export default function TestValidatePage() {
     // ========== 测试1: 单个字段校验 - 校验失败 ==========
     try {
       appendLog("测试1: 单个字段校验 - 校验失败");
+      debugger;
       model.setValue(["user", "name"], "A"); // 只有1个字符，应该失败
       await model.validateField(["user", "name"], false);
       results.push({

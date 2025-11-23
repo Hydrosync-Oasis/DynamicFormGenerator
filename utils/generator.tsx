@@ -2,23 +2,15 @@ import {
   ConfigProvider,
   Divider,
   Alert,
-  Col,
   Radio,
-  Row,
   Input,
   Select,
   Tooltip,
-  Flex,
 } from "antd";
-import React, {
-  useSyncExternalStore,
-  useMemo,
-  useCallback,
-  useRef,
-} from "react";
+import React, { useSyncExternalStore, useMemo, useCallback } from "react";
 import { FieldPath, FieldValue, FormModel } from "./structures";
 import { InfoCircleOutlined } from "@ant-design/icons";
-import { ImmutableFormState } from "./type";
+import { FormCommands, ImmutableFormState } from "./type";
 import { findNodeByPath } from "./helper";
 
 /** 将内部对象 + 布局（二维数组）渲染为多步骤表单 */
@@ -61,14 +53,11 @@ const useDynamicForm = (model: FormModel) => {
         model.resetFields(path);
       },
       /**
-       * 校验指定字段，无论是否显示都校验，使用多步骤动态表单优先使用这个函数
+       * 校验指定字段，使用多步骤动态表单优先使用这个函数
        * @param paths 要校验的字段路径数组
        */
       validateFields: (paths: FieldPath[]) => {
-        return model.validateFields(
-          paths.filter((path) => model.get(path, "visible")),
-          true
-        );
+        return model.validateFields(paths, true);
       },
     };
 
@@ -84,6 +73,7 @@ export const DefaultFieldDisplay = React.memo(
     displayOption,
     state,
     onChange,
+    commands,
   }: {
     displayOption?: {
       labelSpan?: number;
@@ -93,6 +83,7 @@ export const DefaultFieldDisplay = React.memo(
     };
     state: ImmutableFormState;
     onChange: (value: FieldValue, path: FieldPath) => void;
+    commands: FormCommands;
   }) => {
     const labelSpan = displayOption?.labelSpan ?? 4;
     const fieldSpan = displayOption?.fieldSpan ?? 20;
@@ -131,7 +122,11 @@ export const DefaultFieldDisplay = React.memo(
           value={value}
           status={errorMessage && "error"}
           {...controlProps}
-          onChange={(value) => onChange(value, path)}
+          onChange={(value) => {
+            onChange(value, path);
+            commands.validateField(path, true, "onChange");
+          }}
+          onBlur={() => commands.validateField(path, true, "onBlur")}
         />
       );
     } else if (Control === "input") {
@@ -141,7 +136,11 @@ export const DefaultFieldDisplay = React.memo(
           value={value}
           status={errorMessage && "error"}
           {...controlProps}
-          onChange={(e) => onChange(e.target.value, path)}
+          onChange={(e) => {
+            onChange(e.target.value, path);
+            commands.validateField(path, true, "onChange");
+          }}
+          onBlur={() => commands.validateField(path, true, "onBlur")}
         />
       );
     } else if (Control === "select") {
@@ -152,7 +151,11 @@ export const DefaultFieldDisplay = React.memo(
           className="!w-full"
           status={errorMessage && "error"}
           {...controlProps}
-          onChange={(value) => onChange(value, path)}
+          onChange={(value) => {
+            onChange(value, path);
+            commands.validateField(path, true, "onChange");
+          }}
+          onBlur={() => commands.validateField(path, true, "onBlur")}
         />
       );
     } else if (Control === "radio") {
@@ -161,7 +164,11 @@ export const DefaultFieldDisplay = React.memo(
           id={path.join("/")}
           value={value}
           {...controlProps}
-          onChange={(value) => onChange(value.target.value, path)}
+          onChange={(value) => {
+            onChange(value.target.value, path);
+            commands.validateField(path, true, "onChange");
+          }}
+          onBlur={() => commands.validateField(path, true, "onBlur")}
         />
       );
     } else {
@@ -256,7 +263,13 @@ export const DefaultFieldDisplay = React.memo(
                     className="text-[#ff4d4f]"
                     style={{ fontSize: fontSize - 1 }}
                   >
-                    {errorMessage}
+                    {Object.entries(errorMessage).map(([ruleSet, messages]) => (
+                      <div key={ruleSet}>
+                        {messages.map((msg) => (
+                          <div key={msg}>{msg}</div>
+                        ))}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -282,9 +295,11 @@ export const withWiderLabel = (
     ({
       state,
       onChange,
+      commands,
     }: {
       state: ImmutableFormState;
       onChange: (value: FieldValue, path: FieldPath) => void;
+      commands: FormCommands;
     }) => {
       // 覆盖 labelSpan，相应调整 fieldSpan
       const adjustedDisplayOption = {
@@ -299,6 +314,7 @@ export const withWiderLabel = (
           displayOption={adjustedDisplayOption}
           state={state}
           onChange={onChange}
+          commands={commands}
         />
       );
     }
@@ -336,20 +352,17 @@ const Generator = ({
     model.getSnapshot.bind(model)
   );
   // 处理字段值变化的回调
-  const handleChange = (
+  const handleUpdateValue = (
     model: FormModel,
     value: FieldValue,
     path: FieldPath
   ) => {
     model.setValue(path, value, { invokeOnChange: true }, true);
-    // 可选：实时验证
-    model.validateField(path, true).catch(() => {
-      // 验证失败时错误信息已经通过 validateField 内部逻辑设置到 errorMessage
-    });
   };
+
   const changeCallback = useCallback(
     (value: FieldValue, path: FieldPath) => {
-      handleChange(model, value, path);
+      handleUpdateValue(model, value, path);
     },
     [model]
   );
@@ -366,9 +379,10 @@ const Generator = ({
           if (state.LayoutComponent) {
             return (
               <state.LayoutComponent
-                render={renderField}
                 key={path.join(".")}
+                render={renderField}
                 state={state}
+                formCommands={model.formCommands}
               />
             );
           }
@@ -390,16 +404,18 @@ const Generator = ({
           key={path.join("/")}
           state={state}
           onChange={changeCallback}
+          commands={model.formCommands}
         />
       ) : (
         <state.FieldDisplayComponent
           key={path.join("/")}
           state={state}
           onChange={changeCallback}
+          formCommands={model.formCommands}
         />
       );
     },
-    [changeCallback]
+    [changeCallback, model.formCommands]
   );
 
   const theme = useMemo(() => {

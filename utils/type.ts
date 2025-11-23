@@ -24,7 +24,11 @@ export type EffectInvokeReason =
   | "dependencies-collecting"
   | "initial-run";
 
-export type ReactiveEffectContext = {
+export type ReactiveEffectContext = FormCommands & {
+  track: (path: FieldPath) => FieldValue;
+};
+
+export type FormCommands = {
   /**
    * Read a field's value.
    * @param path The field path to read.
@@ -32,7 +36,7 @@ export type ReactiveEffectContext = {
    *                     when used inside rule registration's dependency collection phase.
    *                     Default true. Pass false to read without tracking.
    */
-  get: (path: FieldPath, isDependency?: boolean) => FieldValue;
+  getValue: (path: FieldPath) => FieldValue;
   setVisible: (path: FieldPath, visible: boolean) => void;
   setValue: (
     path: FieldPath,
@@ -47,19 +51,29 @@ export type ReactiveEffectContext = {
       invokeEffect?: boolean;
     }
   ) => void;
-  setValidation: (path: FieldPath, validator: ZodType, ruleSet: string) => void;
+  resetFields: (path?: FieldPath) => void;
+  setValidation: (
+    path: FieldPath,
+    validator: ZodType,
+    ruleSet?: string
+  ) => void;
   setArray: (
     path: FieldPath,
     value: Record<string, any>,
     option?: { invokeEffect?: boolean }
   ) => void;
   setAlertTip: (path: FieldPath, content: React.ReactNode) => void;
-  setItemProp: (path: FieldPath, propName: string, propValue: any) => void;
+  setControlProp: (path: FieldPath, propName: string, propValue: any) => void;
   insertIntoArray: (
     path: FieldPath,
     value: Record<string, any>,
     position: "before" | "after"
   ) => void;
+  validateField: (
+    path: FieldPath,
+    enableEnhancer: boolean,
+    ruleSet?: string
+  ) => Promise<void>;
 };
 
 export interface ReactiveRule {
@@ -153,6 +167,7 @@ export type FieldSchema =
       FieldDisplayComponent?: React.ElementType<{
         state: ImmutableFormState;
         onChange: (value: FieldValue, path: FieldPath) => void;
+        formCommands: FormCommands;
       }>;
     }
   // 数组型嵌套字段
@@ -164,6 +179,7 @@ export type FieldSchema =
       LayoutComponent?: React.ElementType<{
         render: (state: ImmutableFormState) => React.ReactNode;
         state: ImmutableFormState;
+        formCommands: FormCommands;
       }>;
     }
   // 对象型嵌套字段
@@ -175,6 +191,7 @@ export type FieldSchema =
       LayoutComponent?: React.ElementType<{
         render: (state: ImmutableFormState) => React.ReactNode;
         state: ImmutableFormState;
+        formCommands: FormCommands;
       }>;
     };
 
@@ -183,11 +200,16 @@ export interface LeafDynamicProp {
   value?: FieldValue;
   visible: boolean; // 是否显示，响应式触发
   alertTip?: React.ReactNode;
-  errorMessage?: string;
+  errorMessage:
+    | "none"
+    | {
+        [ruleSet: string]: string[] | undefined;
+      };
   validation: {
     [ruleSet: string]: ZodType;
   }; // 响应式校验规则
   controlProp: Record<string, any> | undefined;
+  required: boolean;
 }
 
 export interface LeafFieldStaticProp {
@@ -197,6 +219,7 @@ export interface LeafFieldStaticProp {
   FieldDisplayComponent?: React.ElementType<{
     state: ImmutableFormState;
     onChange: (value: FieldValue, path: FieldPath) => void;
+    formCommands: FormCommands;
   }>;
   defaultValue: FieldValue;
 }
@@ -205,6 +228,7 @@ export interface NestedFieldStaticProp {
   LayoutComponent?: React.ElementType<{
     render: (state: ImmutableFormState) => React.ReactNode;
     state: ImmutableFormState;
+    formCommands: FormCommands;
   }>;
 }
 
@@ -299,6 +323,7 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
           LayoutComponent?: React.ElementType<{
             render: (state: ImmutableFormState) => React.ReactNode;
             state: ImmutableFormState;
+            formCommands: FormCommands;
           }>;
         };
         children: MutableFieldNode[];
@@ -308,7 +333,7 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
 export type ImmutableFormFieldProp = {
   label: string;
   value: any;
-  errorMessage?: string;
+  errorMessage?: Record<string, string[]>;
   visible: boolean;
   alertTip?: React.ReactNode;
   toolTip?: React.ReactNode;
@@ -327,6 +352,7 @@ export type ImmutableFormState =
       FieldDisplayComponent?: React.ElementType<{
         state: ImmutableFormState;
         onChange: (value: FieldValue, path: FieldPath) => void;
+        formCommands: FormCommands;
       }>;
     }
   | {
@@ -338,5 +364,6 @@ export type ImmutableFormState =
       LayoutComponent?: React.ElementType<{
         render: (state: ImmutableFormState) => React.ReactNode;
         state: ImmutableFormState;
+        formCommands: FormCommands;
       }>;
     };

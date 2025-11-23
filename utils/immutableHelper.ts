@@ -21,16 +21,13 @@ export function mutableNodeToImmutableNode(
       prop: {
         label: sourceNode.staticProp.label,
         visible: sourceNode.dynamicProp.visible,
-        value: sourceNode.dynamicProp.value || null,
+        value: sourceNode.dynamicProp.value,
         errorMessage: sourceNode.dynamicProp.errorMessage,
         alertTip: sourceNode.dynamicProp.alertTip,
         toolTip: sourceNode.staticProp.toolTip,
         control: sourceNode.staticProp.control,
         controlProps: sourceNode.dynamicProp.controlProp,
-        required:
-          sourceNode.dynamicProp.validation === undefined
-            ? false
-            : !sourceNode.dynamicProp.validation["onChange"].isOptional(),
+        required: sourceNode.dynamicProp.required,
       },
       FieldDisplayComponent: sourceNode.staticProp.FieldDisplayComponent,
     };
