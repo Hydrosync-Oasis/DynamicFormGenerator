@@ -117,9 +117,8 @@ class ValidatorCacheManager {
             }
             if (!validatorMap[ruleSet]) {
               validatorMap[ruleSet] = {};
-            } else {
-              validatorMap[ruleSet][child.key] = v.validator;
             }
+            validatorMap[ruleSet][child.key] = v.validator;
           });
         }
 
