@@ -110,6 +110,7 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
             : item.validate || { onChange: z.unknown() },
         required: true,
         controlProp: item.controlProps,
+        errorMessage: {},
       },
       staticProp: {
         label: item.label || "未命名",
@@ -1129,7 +1130,7 @@ class FormModel {
         if (node.type === "field") {
           if (node.dynamicProp.validation[ruleSet] === undefined) {
             // 没有校验器，直接返回
-            node.dynamicProp.errorMessage = undefined;
+            node.dynamicProp.errorMessage[ruleSet] = undefined;
             return;
           }
           // 单字段校验
@@ -1137,10 +1138,12 @@ class FormModel {
             node.dynamicProp.value
           );
           if (res?.success) {
-            node.dynamicProp.errorMessage = undefined;
+            node.dynamicProp.errorMessage[ruleSet] = undefined;
           } else {
             // 只保留第一个错误信息
-            node.dynamicProp.errorMessage = res?.error.issues[0].message;
+            node.dynamicProp.errorMessage[ruleSet] = res?.error.issues.map(
+              (i) => i.message
+            );
             finalError = res?.error;
           }
         } else {
@@ -1148,6 +1151,9 @@ class FormModel {
             throw new Error("dirty value");
           }
           const validation = node.cache.validator[ruleSet];
+          if (!validation) {
+            return false;
+          }
           const plainObj = node.cache.plainObj;
           if (validation.type === "hasValue" && plainObj.type === "hasValue") {
             // 校验全对象
@@ -1160,7 +1166,7 @@ class FormModel {
 
             const dfs = (node: MutableFieldNode) => {
               if (node.type === "field") {
-                const info = errorInfo?.find((e) => {
+                const info = errorInfo?.filter((e) => {
                   return isSamePath(
                     path.concat(e.path as string[]),
                     node.path.slice(1)
@@ -1168,9 +1174,11 @@ class FormModel {
                 });
 
                 if (!info) {
-                  node.dynamicProp.errorMessage = undefined;
+                  node.dynamicProp.errorMessage[ruleSet] = undefined;
                 } else {
-                  node.dynamicProp.errorMessage = info.message;
+                  node.dynamicProp.errorMessage[ruleSet] = info.map(
+                    (i) => i.message
+                  );
                 }
                 update(node);
                 return;
@@ -1198,6 +1206,9 @@ class FormModel {
         throw new Error("dirty value");
       }
       const validation = validator[ruleSet];
+      if (!validation) {
+        return Promise.resolve();
+      }
       if (value.type === "hasValue" && validation.type === "hasValue") {
         const res = validation.validator.safeParse(value.objectOnly);
         const info = res.success
@@ -1210,10 +1221,12 @@ class FormModel {
           const dfs = (node: MutableFieldNode): boolean => {
             if (node.type === "field") {
               if (isChildNode(node.path.slice(1), path)) {
-                const msg = info?.find((x) => {
+                const msg = info?.filter((x) => {
                   return isSamePath(x.path as string[], node.path.slice(1));
-                })?.message;
-                node.dynamicProp.errorMessage = msg;
+                });
+                node.dynamicProp.errorMessage[ruleSet] = msg?.map(
+                  (i) => i.message
+                );
                 mutate(node);
                 return true;
               }
@@ -1278,7 +1291,7 @@ class FormModel {
             const defaultValue = n.staticProp.defaultValue;
             n.dynamicProp.value = defaultValue;
             // 清除错误信息
-            n.dynamicProp.errorMessage = undefined;
+            n.dynamicProp.errorMessage = {};
             // 更新缓存
             this.plainCacheManager.updateNode(n);
             this.validatorCacheManager.updateNode(n);

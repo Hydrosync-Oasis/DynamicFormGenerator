@@ -1,5 +1,5 @@
 import { MutableFieldNode, FieldPath, getNodesOnPath } from "./structures";
-import { ImmutableFormState } from "./type";
+import { ImmutableFormFieldProp, ImmutableFormState } from "./type";
 
 export function mutableNodeToImmutableNode(
   sourceNode: MutableFieldNode
@@ -14,6 +14,13 @@ export function mutableNodeToImmutableNode(
 
     // 如果发生了变化，或者是第一次来，都需要生成并赋值
     // 准备好返回的叶子结点
+    const errorMsgEntries = Object.entries(
+      sourceNode.dynamicProp.errorMessage
+    ).filter(([x, msg]) => msg && msg.length > 0) as [string, string[]][];
+    let errorMsg: ImmutableFormFieldProp["errorMessage"] = undefined;
+    if (errorMsgEntries.length > 0) {
+      errorMsg = Object.fromEntries(errorMsgEntries);
+    }
     const leafNode: ImmutableFormState = {
       key: sourceNode.key,
       path: sourceNode.path,
@@ -22,7 +29,7 @@ export function mutableNodeToImmutableNode(
         label: sourceNode.staticProp.label,
         visible: sourceNode.dynamicProp.visible,
         value: sourceNode.dynamicProp.value,
-        errorMessage: sourceNode.dynamicProp.errorMessage,
+        errorMessage: errorMsg,
         alertTip: sourceNode.dynamicProp.alertTip,
         toolTip: sourceNode.staticProp.toolTip,
         control: sourceNode.staticProp.control,

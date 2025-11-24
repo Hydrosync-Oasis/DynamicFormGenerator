@@ -348,7 +348,7 @@ export default function ArrayTestPage() {
           .map((ip) => ip.trim())
           .filter((ip) => ip.length > 0);
 
-        const currentServers = ctx.track(["serversMemory"], false) || {};
+        const currentServers = ctx.getValue(["serversMemory"]) || {};
 
         // 使用IP地址作为key
         const newServers: Record<string, any> = {};
@@ -366,19 +366,19 @@ export default function ArrayTestPage() {
           }
         });
 
-        ctx.setArray(["servers"], newServers, { shouldTriggerRule: true });
+        ctx.setArray(["servers"], newServers, { invokeEffect: true });
       } else if (!ipAddresses || ipAddresses.trim() === "") {
         // 如果IP地址为空，清空服务器数组
-        const currentServers = ctx.track(["servers"], false) || {};
+        const currentServers = ctx.getValue(["servers"]) || {};
         if (Object.keys(currentServers).length > 0) {
-          ctx.setArray(["servers"], {}, { shouldTriggerRule: false });
+          ctx.setArray(["servers"], {}, { invokeEffect: false });
         }
       }
     });
 
     // 注册联动规则2：根据协议类型显示/隐藏SSL证书路径
     model.registerRule((ctx, cause) => {
-      const serversValue = ctx.track(["servers"], true);
+      const serversValue = ctx.track(["servers"]);
       if (serversValue && typeof serversValue === "object") {
         Object.keys(serversValue).forEach((key) => {
           const protocol = ctx.track(["servers", key, "protocol"]);
@@ -413,7 +413,7 @@ export default function ArrayTestPage() {
           .map((ip) => ip.trim())
           .filter((ip) => ip.length > 0);
 
-        const currentServers = ctx.track(["serversMemory"], false) || {};
+        const currentServers = ctx.getValue(["serversMemory"]) || {};
         const currentKeys = Object.keys(currentServers);
 
         // 使用IP地址作为key
@@ -430,19 +430,19 @@ export default function ArrayTestPage() {
           }
         });
 
-        ctx.setArray(["servers2"], newServers, { shouldTriggerRule: true });
+        ctx.setArray(["servers2"], newServers, { invokeEffect: true });
       } else if (!ipAddresses || ipAddresses.trim() === "") {
         // 如果IP地址为空，清空服务器数组
-        const currentServers = ctx.track(["servers2"], false) || {};
+        const currentServers = ctx.getValue(["servers2"]) || {};
         if (Object.keys(currentServers).length > 0) {
-          ctx.setArray(["servers2"], {}, { shouldTriggerRule: false });
+          ctx.setArray(["servers2"], {}, { invokeEffect: false });
         }
       }
     });
 
     // 注册联动规则3：当 servers 变化时，更新虚拟字段 serversMemory
     model.registerRule((ctx, cause) => {
-      const servers = ctx.track(["servers"], true) || {};
+      const servers = ctx.track(["servers"]) || {};
 
       // 更新虚拟字段
       model.setValues(["serversMemory"], servers, { invokeEffect: true });
@@ -450,7 +450,7 @@ export default function ArrayTestPage() {
 
     // 注册联动规则4：当 servers2 变化时，更新虚拟字段 serversMemory
     model.registerRule((ctx, cause) => {
-      const servers2 = ctx.track(["servers2"], true) || {};
+      const servers2 = ctx.track(["servers2"]) || {};
 
       // 更新虚拟字段（完整数据，会自动合并）
       model.setValues(["serversMemory"], servers2, { invokeEffect: true });
@@ -458,12 +458,11 @@ export default function ArrayTestPage() {
 
     // 注册联动规则5：当虚拟字段 serversMemory 变化时，同步到 servers 和 servers2
     model.registerRule((ctx, cause) => {
-      const total = ctx.track(["serversMemory"], true) || {};
+      const total = ctx.track(["serversMemory"]) || {};
 
       // 获取 servers 和 servers2 的当前值（不作为依赖项）
-      const currentServers = ctx.track(["servers"], false) || {};
-      const currentServers2 = ctx.track(["servers2"], false) || {};
-
+      const currentServers = ctx.getValue(["servers"]) || {};
+      const currentServers2 = ctx.getValue(["servers2"]) || {};
       // 从 total 中过滤出 servers 拥有的 key
       const serversKeys = Object.keys(currentServers);
       const newServers: Record<string, any> = {};

@@ -200,11 +200,9 @@ export interface LeafDynamicProp {
   value?: FieldValue;
   visible: boolean; // 是否显示，响应式触发
   alertTip?: React.ReactNode;
-  errorMessage:
-    | "none"
-    | {
-        [ruleSet: string]: string[] | undefined;
-      };
+  errorMessage: {
+    [ruleSet: string]: string[] | undefined;
+  };
   validation: {
     [ruleSet: string]: ZodType;
   }; // 响应式校验规则
@@ -333,7 +331,7 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
 export type ImmutableFormFieldProp = {
   label: string;
   value: any;
-  errorMessage?: Record<string, string[]>;
+  errorMessage?: Record<string, string[]> | undefined;
   visible: boolean;
   alertTip?: React.ReactNode;
   toolTip?: React.ReactNode;

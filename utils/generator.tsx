@@ -73,7 +73,7 @@ export const DefaultFieldDisplay = React.memo(
     displayOption,
     state,
     onChange,
-    commands,
+    formCommands,
   }: {
     displayOption?: {
       labelSpan?: number;
@@ -83,7 +83,7 @@ export const DefaultFieldDisplay = React.memo(
     };
     state: ImmutableFormState;
     onChange: (value: FieldValue, path: FieldPath) => void;
-    commands: FormCommands;
+    formCommands: FormCommands;
   }) => {
     const labelSpan = displayOption?.labelSpan ?? 4;
     const fieldSpan = displayOption?.fieldSpan ?? 20;
@@ -124,9 +124,9 @@ export const DefaultFieldDisplay = React.memo(
           {...controlProps}
           onChange={(value) => {
             onChange(value, path);
-            commands.validateField(path, true, "onChange");
+            formCommands.validateField(path, true, "onChange");
           }}
-          onBlur={() => commands.validateField(path, true, "onBlur")}
+          onBlur={() => formCommands.validateField(path, true, "onBlur")}
         />
       );
     } else if (Control === "input") {
@@ -138,9 +138,9 @@ export const DefaultFieldDisplay = React.memo(
           {...controlProps}
           onChange={(e) => {
             onChange(e.target.value, path);
-            commands.validateField(path, true, "onChange");
+            formCommands.validateField(path, true, "onChange");
           }}
-          onBlur={() => commands.validateField(path, true, "onBlur")}
+          onBlur={() => formCommands.validateField(path, true, "onBlur")}
         />
       );
     } else if (Control === "select") {
@@ -153,9 +153,9 @@ export const DefaultFieldDisplay = React.memo(
           {...controlProps}
           onChange={(value) => {
             onChange(value, path);
-            commands.validateField(path, true, "onChange");
+            formCommands.validateField(path, true, "onChange");
           }}
-          onBlur={() => commands.validateField(path, true, "onBlur")}
+          onBlur={() => formCommands.validateField(path, true, "onBlur")}
         />
       );
     } else if (Control === "radio") {
@@ -166,9 +166,9 @@ export const DefaultFieldDisplay = React.memo(
           {...controlProps}
           onChange={(value) => {
             onChange(value.target.value, path);
-            commands.validateField(path, true, "onChange");
+            formCommands.validateField(path, true, "onChange");
           }}
-          onBlur={() => commands.validateField(path, true, "onBlur")}
+          onBlur={() => formCommands.validateField(path, true, "onBlur")}
         />
       );
     } else {
@@ -314,7 +314,7 @@ export const withWiderLabel = (
           displayOption={adjustedDisplayOption}
           state={state}
           onChange={onChange}
-          commands={commands}
+          formCommands={commands}
         />
       );
     }
@@ -404,7 +404,7 @@ const Generator = ({
           key={path.join("/")}
           state={state}
           onChange={changeCallback}
-          commands={model.formCommands}
+          formCommands={model.formCommands}
         />
       ) : (
         <state.FieldDisplayComponent
