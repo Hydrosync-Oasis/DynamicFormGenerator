@@ -140,7 +140,9 @@ export const DefaultFieldDisplay = React.memo(
             onChange(e.target.value, path);
             formCommands.validateField(path, true, "onChange");
           }}
-          onBlur={() => formCommands.validateField(path, true, "onBlur")}
+          onBlur={() => {
+            formCommands.validateField(path, true, "onBlur");
+          }}
         />
       );
     } else if (Control === "select") {
@@ -264,11 +266,7 @@ export const DefaultFieldDisplay = React.memo(
                     style={{ fontSize: fontSize - 1 }}
                   >
                     {Object.entries(errorMessage).map(([ruleSet, messages]) => (
-                      <div key={ruleSet}>
-                        {messages.map((msg) => (
-                          <div key={msg}>{msg}</div>
-                        ))}
-                      </div>
+                      <div key={ruleSet}>{messages[0]}</div>
                     ))}
                   </div>
                 )}

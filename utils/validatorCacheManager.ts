@@ -138,12 +138,25 @@ class ValidatorCacheManager {
           );
 
           // 应用自定义的 refine（如果存在）
+          // 需要求字节点中出现的RuleSet和当前节点的refiner里出现的RuleSet的并集
+          const set = new Set<string>();
           Object.entries(validator).forEach(([ruleSet, v]) => {
             const refineFn = node.dynamicProp.validationRefine?.[ruleSet];
+            set.add(ruleSet);
             if (refineFn) {
               v.validator = refineFn(v.validator);
             }
           });
+          const refiners = node.dynamicProp.validationRefine;
+          for (let ruleSet in refiners) {
+            if (!set.has(ruleSet)) {
+              // 说明该ruleSet下没有子字段约束，只有refine约束
+              validator[ruleSet] = {
+                type: "hasValue",
+                validator: refiners[ruleSet](z.any()),
+              };
+            }
+          }
 
           cache.validator = validator;
         } else {

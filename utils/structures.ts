@@ -300,7 +300,7 @@ class FormModel {
       path: FieldPath,
       enableEnhancer: boolean,
       ruleSet?: string
-    ) => this.validateField(path, enableEnhancer, ruleSet, true),
+    ) => this.validateFieldForRuleset(path, enableEnhancer, ruleSet, true),
   };
 
   constructor(schema: FormSchema) {
@@ -976,7 +976,8 @@ class FormModel {
             this.insertIntoArray(path, value, position),
           setControlProp: (path, propName, propValue) =>
             this.setControlProp(path, propName, propValue),
-          validateField: (path, ruleSet) => this.validateField(path, ruleSet),
+          validateField: (path, ruleSet) =>
+            this.validateFieldForRuleset(path, ruleSet),
         },
         cause,
         info
@@ -1108,11 +1109,40 @@ class FormModel {
     }
   }
 
+  async validateField(
+    path: FieldPath,
+    enableEnhancer?: boolean,
+    shouldNotify: boolean = false
+  ): Promise<void> {
+    const node = this.findNodeByPath(path);
+    if (!node) {
+      throw new Error("the node is not found." + path);
+    }
+    const validator = node.cache.validator;
+    this.validatorCacheManager.rebuild();
+    if (validator === "dirty") {
+      throw new Error("dirty values");
+    }
+
+    const allRuleSets = Object.keys(validator);
+    try {
+      await Promise.all(
+        allRuleSets.map((r) =>
+          this.validateFieldForRuleset(path, enableEnhancer, r)
+        )
+      );
+    } finally {
+      if (shouldNotify) {
+        this.notify();
+      }
+    }
+  }
+
   /** 校验某一个字段，如果是一个嵌套字段，校验内部嵌套的所有可见字段；仅设置该字段的错误信息，
    * 如需触发联动的字段校验请用`registerRule`手动触发校验
    * @param enableEnhancer 是否启用祖先字段上的跨字段校验函数
    */
-  validateField(
+  validateFieldForRuleset(
     path: FieldPath,
     enableEnhancer?: boolean,
     ruleSet: string = "onChange",
