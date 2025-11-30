@@ -55,6 +55,8 @@ export default function PerfArrayPage() {
       // eslint-disable-next-line no-console
       console.log("提交数据:", data);
     } catch (e) {
+      console.log(e);
+
       message.error("请检查表单校验错误");
     }
   };
@@ -65,13 +67,13 @@ export default function PerfArrayPage() {
       data[i] = `Item ${i + 1}`;
     }
     console.time("refill setArray(100)");
-    model.setArray(["items"], data);
+    model.setArray(["items"], data, undefined, true);
     console.timeEnd("refill setArray(100)");
   };
 
   const clearAll = () => {
     console.time("clear setArray(0)");
-    model.setArray(["items"], {});
+    model.setArray(["items"], {}, undefined, true);
     console.timeEnd("clear setArray(0)");
   };
 

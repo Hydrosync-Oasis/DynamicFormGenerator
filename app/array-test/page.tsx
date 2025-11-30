@@ -267,7 +267,7 @@ export default function ArrayTestPage() {
         {
           key: "serversMemory",
           label: "服务器记忆状态（虚拟字段）",
-          visible: false,
+          initialVisible: false,
           isArray: true,
           LayoutComponent: ServersFlexLayout,
           arraySchema: {

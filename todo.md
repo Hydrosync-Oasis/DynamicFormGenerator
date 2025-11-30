@@ -65,6 +65,6 @@
    1. 是**深比较**。
    2. 每个节点的`NodeCache`中存放字段是否是dirty，有三种状态：`unknown`，`dirty`，`clean`。`unknown`说明该缓存过期。
       当值发生变化的时候缓存失效，需要时才重新计算缓存。
-      深比较时，从表单的每个字段的`visible`来出发，若`visible===true`但`initialValue`没有该属性，直接标记为`dirty`，否则递归向下比对值，若该嵌套字段下每个成员都是。
-   3. 
+   3. 增加一个与`visible`正交的属性`includePolicy: 'always' | 'whenVisible' | 'never'`，以增强对字段在提交时是否包含的控制。
+   4. 深比较时，从表单的每个字段的`visible`和`includePolicy`来出发，若会被包含在最终提交数据上，但`initialValue`里没有该属性，直接标记为`dirty`（反之亦然），否则递归向下比对值，若该嵌套字段下每个成员都比对成功，整个字段的`dirty`都是`false`。
 2. 在`ctx`增加*未显式填写时设置默认值*的API，提供手动输入`dirty`的参数让用户选择是否应该是脏数据，待提交给后端

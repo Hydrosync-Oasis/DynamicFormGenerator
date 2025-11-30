@@ -1,22 +1,18 @@
 import { z, ZodType } from "zod";
-import { MutableFieldNode, NodeCache } from "./type";
+import { MutableFieldNode } from "./type";
 import { getNodesOnPath } from "./structures";
-import { ru } from "zod/locales";
-import { rule } from "postcss";
 
 class ValidatorCacheManager {
   mutableDataSource: MutableFieldNode;
 
   finalValidator:
+    | "hidden"
     | Record<
         string,
-        | {
-            type: "hasValue";
-            validator: ZodType;
-          }
-        | {
-            type: "hidden";
-          }
+        {
+          type: "hasValue";
+          validator: ZodType;
+        }
       >
     | undefined = undefined;
 
@@ -50,15 +46,17 @@ class ValidatorCacheManager {
       if (validatorCache === "dirty") {
         return;
       }
+      if (validatorCache === "hidden") {
+        n.cache.validator = "dirty";
+        return;
+      }
 
       if (ruleSet) {
         validatorCache[ruleSet] = { type: "dirty" };
         return;
       }
 
-      Object.keys(validatorCache).forEach((k) => {
-        validatorCache[k] = { type: "dirty" };
-      });
+      n.cache.validator = "dirty";
     });
   }
 
@@ -68,42 +66,55 @@ class ValidatorCacheManager {
   rebuild() {
     const dfs = (
       node: MutableFieldNode
-    ): {
-      [ruleSet: string]:
-        | { type: "hidden" }
-        | { type: "hasValue"; validator: ZodType };
-    } => {
+    ):
+      | {
+          [ruleSet: string]: { type: "hasValue"; validator: ZodType };
+        }
+      | "hidden" => {
       const cache = node.cache;
 
       if (node.type === "field") {
         const visible = node.dynamicProp.visible;
-        const res: {
-          [ruleSet: string]:
-            | { type: "hidden" }
-            | { type: "hasValue"; validator: ZodType };
-        } = Object.fromEntries(
+        const shouldInclude =
+          (visible && node.dynamicProp.includePolicy !== "never") ||
+          node.dynamicProp.includePolicy === "always";
+        let res:
+          | {
+              [ruleSet: string]: { type: "hasValue"; validator: ZodType };
+            }
+          | "hidden" = Object.fromEntries(
           Object.entries(node.dynamicProp.validation).map(([k, v]) => {
-            return [
-              k,
-              visible ? { type: "hasValue", validator: v } : { type: "hidden" },
-            ];
+            return [k, { type: "hasValue", validator: v }];
           })
         );
+        if (!shouldInclude) {
+          res = "hidden";
+        }
         cache.validator = res;
 
         return res;
       } else {
         // object 或 array 类型
         if (
+          // 如果所有的ruleSet都有值
           cache.validator !== "dirty" &&
           Object.entries(cache.validator).filter(([_, v]) => v.type === "dirty")
             .length === 0
         ) {
-          return cache.validator as {
-            [ruleSet: string]:
-              | { type: "hidden" }
-              | { type: "hasValue"; validator: ZodType };
-          };
+          return cache.validator as
+            | {
+                [ruleSet: string]: { type: "hasValue"; validator: ZodType };
+              }
+            | "hidden";
+        }
+
+        const shouldInclude =
+          (node.dynamicProp.visible &&
+            node.dynamicProp.includePolicy !== "never") ||
+          node.dynamicProp.includePolicy === "always";
+
+        if (!shouldInclude) {
+          return "hidden";
         }
 
         const validatorMap: Record<string, Record<string, ZodType>> = {};
@@ -160,14 +171,17 @@ class ValidatorCacheManager {
 
           cache.validator = validator;
         } else {
-          cache.validator = {};
+          // 嵌套节点本身可见，但没有子节点，仍然应该有校验规则
+          cache.validator = {
+            default: { type: "hasValue", validator: z.object() },
+          };
         }
 
-        return cache.validator as {
-          [ruleSet: string]:
-            | { type: "hidden" }
-            | { type: "hasValue"; validator: ZodType };
-        };
+        return cache.validator as
+          | {
+              [ruleSet: string]: { type: "hasValue"; validator: ZodType };
+            }
+          | "hidden";
       }
     };
 

@@ -49,7 +49,11 @@ class PlainObjectCacheManager {
       const cache = node.cache;
       if (node.type === "field") {
         const visible = node.dynamicProp.visible;
-        if (visible) {
+        const shouldInclude =
+          node.dynamicProp.includePolicy === "always" ||
+          (visible && node.dynamicProp.includePolicy !== "never");
+
+        if (shouldInclude) {
           cache.plainObj = {
             submitData: node.dynamicProp.value,
             objectOnly: node.dynamicProp.value,
@@ -71,18 +75,22 @@ class PlainObjectCacheManager {
         const validateObj: Record<string, any> = {};
         const objOnlyIncludesHdn: Record<string, any> = {};
         const submitObj: Record<string, any> = {};
+        const shouldInclude =
+          node.dynamicProp.includePolicy === "always" ||
+          (node.dynamicProp.visible &&
+            node.dynamicProp.includePolicy !== "never");
 
         for (let i of node.children) {
           const res = dfs(i);
           // 一定不是undefined了
-          if (res && res.type === "hasValue" && node.dynamicProp.visible) {
+          if (res && res.type === "hasValue") {
             validateObj[i.key] = res.objectOnly;
             submitObj[i.key] = res.submitData;
           }
           objOnlyIncludesHdn[i.key] = res.objectOnlyIncludesHidden;
         }
 
-        if (Object.keys(validateObj).length > 0) {
+        if (shouldInclude) {
           // 当当前节点是数组类型时，submitData 需要是一个“仅包含值的数组”（丢弃 key）
           // 为了保证顺序，按 children 顺序收集已有的值
           const submitData =
@@ -110,6 +118,7 @@ class PlainObjectCacheManager {
       }
     };
 
+    // debugger;
     const res = dfs(this.mutableDataSource);
     this.mutableDataSource.cache.plainObj = res;
     if (res.type === "hasValue") {

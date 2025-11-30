@@ -17,12 +17,10 @@ import {
   ReactiveEffectContext,
   ReactiveRule,
   FormCommands,
+  IncludePolicy,
+  FieldOrigin,
 } from "./type";
 import { isChildNode, isSamePath } from "./helper";
-
-type FieldProp = {
-  children: FieldSchema[];
-} & LeafDynamicProp;
 
 interface FormSchema {
   fields: FieldSchema[];
@@ -67,7 +65,10 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       key: item.key,
       path: path,
       type: "array",
-      dynamicProp: { visible: item.visible ?? true },
+      dynamicProp: {
+        visible: item.initialVisible ?? true,
+        includePolicy: item.includePolicy ?? "when-visible",
+      },
       staticProp: {
         schema: item.arraySchema!,
         LayoutComponent: item.LayoutComponent,
@@ -84,7 +85,10 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       key: item.key,
       path: path,
       type: "object",
-      dynamicProp: { visible: item.visible ?? true },
+      dynamicProp: {
+        visible: item.initialVisible ?? true,
+        includePolicy: item.includePolicy ?? "when-visible",
+      },
       staticProp: {
         LayoutComponent: item.LayoutComponent,
       },
@@ -99,9 +103,11 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       key: item.key,
       path: path,
       type: "field",
+      origin: "initial",
       dynamicProp: {
         value: item.defaultValue,
         visible: item.initialVisible ?? true,
+        includePolicy: item.includePolicy ?? "when-visible",
         validation:
           item.validate instanceof ZodType
             ? {
@@ -136,7 +142,6 @@ const compileNodes = (
     ),
   cur: MutableFieldNode & { type: "object" | "array" },
   seenPath: FieldPath,
-  currentVersion: number,
   rootArrayField?: MutableFieldNode
 ) => {
   let root = rootArrayField;
@@ -156,13 +161,7 @@ const compileNodes = (
       ]);
 
       if (newNode.type !== "field" && "isArray" in schemaItem) {
-        compileNodes(
-          schemaItem,
-          newNode,
-          [...seenPath, schemaItem.key],
-          currentVersion,
-          root
-        );
+        compileNodes(schemaItem, newNode, [...seenPath, schemaItem.key], root);
       } else {
         // 否则是叶子结点不需要继续递归
       }
@@ -180,12 +179,65 @@ const compileNodes = (
 };
 
 /**
+ * 从FormSchema生成初始值对象
+ * 根据defaultValue、initialVisible和includePolicy的关系决定是否包含字段
+ * @param schema 表单Schema
+ * @returns 初始值对象
+ */
+function generateInitialValues(schema: FormSchema): Record<string, any> {
+  const result: Record<string, any> = {};
+
+  const processField = (field: FieldSchema): any => {
+    const visible = field.initialVisible ?? true;
+    const includePolicy = field.includePolicy ?? "when-visible";
+
+    // 根据includePolicy和visible决定是否包含该字段
+    const shouldInclude =
+      includePolicy === "always" ||
+      (includePolicy === "when-visible" && visible);
+
+    if (!shouldInclude) {
+      return undefined;
+    }
+
+    // 如果是数组或对象字段
+    if ("isArray" in field) {
+      if (field.isArray) {
+        // 数组字段默认返回空对象（因为使用key-value结构）
+        return {};
+      } else {
+        // 对象字段，递归处理子字段
+        const childResult: Record<string, any> = {};
+        for (const childField of field.childrenFields || []) {
+          const childValue = processField(childField);
+          if (childValue !== undefined) {
+            childResult[childField.key] = childValue;
+          }
+        }
+        return Object.keys(childResult).length > 0 ? childResult : undefined;
+      }
+    } else {
+      // 叶子字段，返回defaultValue
+      return field.defaultValue;
+    }
+  };
+
+  for (const field of schema.fields) {
+    const value = processField(field);
+    if (value !== undefined) {
+      result[field.key] = value;
+    }
+  }
+
+  return result;
+}
+
+/**
  * 全量编译schema为可变节点，不保留任何旧信息，适用于初次设置
  * @param value
  * @param schema
  * @param path
  * @param rootArrayField
- * @param currentVersion
  * @returns
  */
 const compileArrayNode = (
@@ -193,7 +245,7 @@ const compileArrayNode = (
   schema: FieldSchema,
   path: FieldPath,
   rootArrayField: MutableFieldNode & { type: "array" },
-  currentVersion: number
+  origin: FieldOrigin
 ): MutableFieldNode => {
   if (!("isArray" in schema)) {
     // 返回一个field type的节点
@@ -219,13 +271,7 @@ const compileArrayNode = (
         key: key,
       } as FieldSchema;
       children.push(
-        compileArrayNode(
-          v,
-          childSchema,
-          [...path, key],
-          rootArrayField,
-          currentVersion
-        )
+        compileArrayNode(v, childSchema, [...path, key], rootArrayField, origin)
       );
     });
 
@@ -242,13 +288,7 @@ const compileArrayNode = (
       const k = childSchema.key;
       const v = value?.[k];
       children.push(
-        compileArrayNode(
-          v,
-          childSchema,
-          [...path, k],
-          rootArrayField,
-          currentVersion
-        )
+        compileArrayNode(v, childSchema, [...path, k], rootArrayField, origin)
       );
     });
     return node;
@@ -266,7 +306,8 @@ class FormModel {
   /** 校验器缓存管理器 */
   private validatorCacheManager!: ValidatorCacheManager;
 
-  private currentVersion: number;
+  /** 表单初始值，可在创建初、或通过reset设置表单初始值 */
+  private initialValues?: Record<string, any>;
 
   private listeners = new Set<() => void>();
 
@@ -292,8 +333,9 @@ class FormModel {
     insertIntoArray: (
       path: FieldPath,
       value: Record<string, any>,
-      position: "before" | "after"
-    ) => this.insertIntoArray(path, value, position),
+      key?: string,
+      position?: "before" | "after"
+    ) => this.insertIntoArray(path, value, position, key, true),
     setControlProp: (path: FieldPath, propName: string, propValue: any) =>
       this.setControlProp(path, propName, propValue, true),
     validateField: (
@@ -301,6 +343,8 @@ class FormModel {
       enableEnhancer: boolean,
       ruleSet?: string
     ) => this.validateFieldForRuleset(path, enableEnhancer, ruleSet, true),
+    setIncludePolicy: (path: FieldPath, policy: IncludePolicy) =>
+      this.setIncludePolicy(path, policy),
   };
 
   constructor(schema: FormSchema) {
@@ -311,7 +355,7 @@ class FormModel {
       path: ["dummy"],
       type: "object",
       children: [],
-      dynamicProp: { visible: true },
+      dynamicProp: { visible: true, includePolicy: "always" },
       staticProp: {},
       snapshot: { dirty: true },
       cache: { plainObj: { type: "dirty" }, validator: "dirty" },
@@ -325,11 +369,11 @@ class FormModel {
         isArray: false,
       },
       this.mutableDataSource,
-      ["dummy"],
-      0
+      ["dummy"]
     );
 
-    this.currentVersion = 0;
+    // 从FormSchema生成初始值
+    this.initialValues = generateInitialValues(schema);
 
     // 初始化最终对象缓存管理器
     this.plainCacheManager = new PlainObjectCacheManager(
@@ -407,20 +451,61 @@ class FormModel {
 
   setVisible(path: FieldPath, visible: boolean, shouldNotify = false) {
     setMutableNode(this.mutableDataSource, path, (node) => {
+      let submitDataModified = true;
       if (Object.is(node.dynamicProp.visible, visible)) {
         return false;
       }
+      if (node.type === "field") {
+        if (["always", "never"].includes(node.dynamicProp.includePolicy)) {
+          submitDataModified = false;
+        }
+      }
+
       node.dynamicProp.visible = visible;
-      this.validatorCacheManager.updateNode(node);
-      this.plainCacheManager.updateNode(node);
-
-      this.validatorCacheManager.rebuild();
-      this.plainCacheManager.rebuild();
-
-      if (shouldNotify) {
-        this.notify();
+      if (submitDataModified) {
+        this.validatorCacheManager.updateNode(node);
+        this.plainCacheManager.updateNode(node);
       }
     });
+    if (shouldNotify) {
+      this.notify();
+    }
+  }
+
+  setIncludePolicy(path: FieldPath, policy: IncludePolicy) {
+    let submitDataModified = true;
+    const node = this.findNodeByPath(path);
+    if (!node) {
+      throw new Error("the field is not found:" + path);
+    }
+    if (node.dynamicProp.includePolicy === policy) {
+      return;
+    }
+
+    const oldPolicy = node.dynamicProp.includePolicy;
+    const visible = node.dynamicProp.visible;
+    if (
+      visible &&
+      ((policy === "always" && oldPolicy === "when-visible") ||
+        (policy === "when-visible" && oldPolicy === "always"))
+    ) {
+      submitDataModified = false;
+    }
+
+    if (
+      !visible &&
+      ((policy === "never" && oldPolicy === "when-visible") ||
+        (policy === "when-visible" && oldPolicy === "never"))
+    ) {
+      submitDataModified = false;
+    }
+
+    node.dynamicProp.includePolicy = policy;
+
+    if (submitDataModified) {
+      this.validatorCacheManager.updateNode(node);
+      this.plainCacheManager.updateNode(node);
+    }
   }
 
   setValue(
@@ -450,6 +535,7 @@ class FormModel {
       // 判断是否是在数组嵌套字段内部
       if (nodes.some((x) => x.type === "array")) {
         node.dynamicProp.value = value;
+        node.origin = "user";
         // 值变更后，标记缓存
         this.plainCacheManager.updateNode(node);
 
@@ -567,7 +653,7 @@ class FormModel {
             },
             node.path,
             node,
-            this.currentVersion
+            "user"
           ) as MutableFieldNode & { type: "array" };
 
           node.children.push(...newNodes.children);
@@ -746,7 +832,7 @@ class FormModel {
       },
       ["dummy", ...path],
       node,
-      this.currentVersion
+      "user"
     ) as MutableFieldNode & {
       type: "array";
     };
@@ -800,7 +886,7 @@ class FormModel {
       },
       ["dummy", ...path],
       node,
-      this.currentVersion
+      "user"
     ) as MutableFieldNode & {
       type: "array";
     };
@@ -908,6 +994,7 @@ class FormModel {
         resetFields: () => void 0,
         insertIntoArray: () => void 0,
         validateField: () => Promise.resolve(),
+        setIncludePolicy: () => void 0,
       },
       "dependencies-collecting"
     );
@@ -934,6 +1021,7 @@ class FormModel {
   initial() {
     this.plainCacheManager.rebuild();
     this.validatorCacheManager.rebuild();
+
     this.runEffects(
       new Set(
         [...this.rules].map((r) => {
@@ -957,27 +1045,9 @@ class FormModel {
     for (const effect of effects) {
       effect(
         {
+          ...this.formCommands,
+          // 唯一多出来的函数，用于跟踪依赖
           track: (path) => this.get(path, "value"),
-          getValue: (k) => this.get(k, "value"),
-          setVisible: (path, visible) => this.setVisible(path, visible),
-          setValue: (path, value, option) => this.setValue(path, value, option),
-          setValues: (path, values, option) => {
-            this.setValues(path, values, option);
-          },
-          resetFields: (path) => this.resetFields(path),
-          setValidation: (path, validator, ruleSet) =>
-            this.setValidation(path, validator as any, false, ruleSet),
-          setArray: (path, chilren, option) => {
-            this.setArray(path, chilren, option);
-          },
-          // this.updateChildren(path, chilren, option),
-          setAlertTip: (path, content) => this.setAlertTip(path, content),
-          insertIntoArray: (path, value, position) =>
-            this.insertIntoArray(path, value, position),
-          setControlProp: (path, propName, propValue) =>
-            this.setControlProp(path, propName, propValue),
-          validateField: (path, ruleSet) =>
-            this.validateFieldForRuleset(path, ruleSet),
         },
         cause,
         info
@@ -1118,8 +1188,8 @@ class FormModel {
     if (!node) {
       throw new Error("the node is not found." + path);
     }
-    const validator = node.cache.validator;
     this.validatorCacheManager.rebuild();
+    const validator = node.cache.validator;
     if (validator === "dirty") {
       throw new Error("dirty values");
     }
@@ -1157,6 +1227,14 @@ class FormModel {
     let finalError: ZodError | undefined = undefined;
     if (!enableEnhancer) {
       setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+        const validator = node.cache.validator;
+        if (validator === "dirty") {
+          throw new Error("dirty value");
+        }
+        if (validator === "hidden") {
+          return false;
+        }
+
         if (node.type === "field") {
           if (node.dynamicProp.validation[ruleSet] === undefined) {
             // 没有校验器，直接返回
@@ -1180,7 +1258,7 @@ class FormModel {
           if (node.cache.validator === "dirty") {
             throw new Error("dirty value");
           }
-          const validation = node.cache.validator[ruleSet];
+          const validation = validator[ruleSet];
           if (!validation) {
             return false;
           }
@@ -1234,6 +1312,9 @@ class FormModel {
       const validator = this.mutableDataSource.cache.validator;
       if (validator === "dirty" || value.type === "dirty") {
         throw new Error("dirty value");
+      }
+      if (validator === "hidden") {
+        return Promise.resolve();
       }
       const validation = validator[ruleSet];
       if (!validation) {
