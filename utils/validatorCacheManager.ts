@@ -72,19 +72,19 @@ class ValidatorCacheManager {
         }
       | "hidden" => {
       const cache = node.cache;
+      const policy = node.dynamicProp.includePolicy;
 
       if (node.type === "field") {
         const visible = node.dynamicProp.visible;
         const shouldInclude =
-          (visible && node.dynamicProp.includePolicy !== "never") ||
-          node.dynamicProp.includePolicy === "always";
+          (visible && policy !== "never") || policy === "always";
         let res:
           | {
               [ruleSet: string]: { type: "hasValue"; validator: ZodType };
             }
           | "hidden" = Object.fromEntries(
-          Object.entries(node.dynamicProp.validation).map(([k, v]) => {
-            return [k, { type: "hasValue", validator: v }];
+          Object.entries(node.dynamicProp.validation).map(([rSet, v]) => {
+            return [rSet, { type: "hasValue", validator: v }];
           })
         );
         if (!shouldInclude) {
@@ -108,12 +108,13 @@ class ValidatorCacheManager {
             | "hidden";
         }
 
-        const shouldInclude =
-          (node.dynamicProp.visible &&
-            node.dynamicProp.includePolicy !== "never") ||
-          node.dynamicProp.includePolicy === "always";
+        const maybeInclude =
+          (node.dynamicProp.visible && policy !== "never") ||
+          policy === "always" ||
+          // 有可能include，比如自己不可见但子节点存在
+          policy === "when-children-include";
 
-        if (!shouldInclude) {
+        if (!maybeInclude) {
           return "hidden";
         }
 
@@ -171,10 +172,16 @@ class ValidatorCacheManager {
 
           cache.validator = validator;
         } else {
-          // 嵌套节点本身可见，但没有子节点，仍然应该有校验规则
-          cache.validator = {
-            default: { type: "hasValue", validator: z.object() },
-          };
+          if (policy === "always") {
+            // 嵌套节点本身可见，但没有子节点，仍然应该有校验规则
+            cache.validator = {
+              default: { type: "hasValue", validator: z.object() },
+            };
+          } else if (policy === "when-children-include") {
+            return "hidden";
+          } else {
+            throw new Error("不应该为never");
+          }
         }
 
         return cache.validator as

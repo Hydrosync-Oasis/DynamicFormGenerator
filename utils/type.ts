@@ -51,6 +51,11 @@ export type FormCommands = {
       invokeEffect?: boolean;
     }
   ) => void;
+  setValuesIfUserNotModified: (
+    path: FieldPath,
+    values: any,
+    dirty: boolean
+  ) => void;
   resetFields: (path?: FieldPath) => void;
   setValidation: (
     path: FieldPath,
@@ -75,7 +80,7 @@ export type FormCommands = {
     enableEnhancer: boolean,
     ruleSet?: string
   ) => Promise<void>;
-  setIncludePolicy: (path: FieldPath, policy: IncludePolicy) => void;
+  setIncludePolicy: (path: FieldPath, policy: IncludePolicyLeafField) => void;
 };
 
 export interface ReactiveRule {
@@ -95,9 +100,12 @@ export type ReactiveEffect = (
  * - "never": Never include the field, even if visible.
  * - "when-visible": Include the field only if it is currently visible.
  */
-export type IncludePolicy = "always" | "never" | "when-visible";
+export type IncludePolicyLeafField = "always" | "never" | "when-visible";
+export type IncludePolicyNestedField =
+  | IncludePolicyLeafField
+  | "when-children-include";
 
-export type FieldOrigin = "initial" | "user" | "source";
+export type FieldSource = "initial" | "user" | "source";
 
 /**
  * Describes the schema of a dynamic form field, supporting:
@@ -175,7 +183,7 @@ export type FieldSchema =
       initialVisible?: boolean;
       controlProps?: Record<string, unknown>;
       defaultValue?: FieldValue;
-      includePolicy?: IncludePolicy;
+      includePolicy?: IncludePolicyLeafField;
       helpTip?: string | JSX.Element;
       FieldDisplayComponent?: React.ElementType<{
         state: ImmutableFormState;
@@ -188,7 +196,7 @@ export type FieldSchema =
       key: FieldKey;
       isArray: true;
       initialVisible?: boolean;
-      includePolicy?: IncludePolicy;
+      includePolicy?: IncludePolicyNestedField;
       arraySchema: Omit<FieldSchema, "key">;
       LayoutComponent?: React.ElementType<{
         render: (state: ImmutableFormState) => React.ReactNode;
@@ -201,7 +209,7 @@ export type FieldSchema =
       key: FieldKey;
       isArray: false;
       initialVisible?: boolean;
-      includePolicy?: IncludePolicy;
+      includePolicy?: IncludePolicyNestedField;
       childrenFields: FieldSchema[];
       LayoutComponent?: React.ElementType<{
         render: (state: ImmutableFormState) => React.ReactNode;
@@ -214,7 +222,7 @@ export type FieldSchema =
 export interface LeafDynamicProp {
   value?: FieldValue;
   visible: boolean; // 是否显示，响应式触发
-  includePolicy: IncludePolicy; // 控制是否包含在导出数据中
+  includePolicy: IncludePolicyLeafField; // 控制是否包含在导出数据中
   alertTip?: React.ReactNode;
   errorMessage: {
     [ruleSet: string]: string[] | undefined;
@@ -249,7 +257,7 @@ export interface NestedFieldStaticProp {
 export interface NestedFieldDynamicProp {
   validationRefine?: { [ruleSet: string]: (z: ZodType) => ZodType };
   visible: boolean;
-  includePolicy: IncludePolicy;
+  includePolicy: IncludePolicyNestedField;
 }
 
 type MutableFieldNodeBaseType = {
@@ -310,6 +318,13 @@ export type NodeCache = {
               validator: ZodType;
             };
       };
+  // 该值与初始值的diff结果，深比较不相等dirty===true，缓存失效是dirty
+  dirty:
+    | {
+        isDirty: boolean;
+        isInclude: boolean;
+      }
+    | "dirty";
 };
 
 export type MutableFieldNode = MutableFieldNodeBaseType &
@@ -318,7 +333,7 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
         type: "field";
         dynamicProp: LeafDynamicProp;
         staticProp: LeafFieldStaticProp;
-        origin: FieldOrigin;
+        source: FieldSource;
         /** 字段运行时的响应式字段，如果字段是isArray: true的子节点，则无效 */
         effect: Set<ReactiveEffect>;
       }

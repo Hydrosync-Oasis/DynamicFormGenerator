@@ -1,4 +1,4 @@
-import { FieldPath, ImmutableFormState } from "./type";
+import { FieldPath, ImmutableFormState, MutableFieldNode } from "./type";
 
 export function isChildNode(path1: FieldPath, path2: FieldPath): boolean {
   if (path1.length < path2.length) {
@@ -51,3 +51,11 @@ export const findNodeByPath = (
 
   return findNodeByPath(child, rest);
 };
+
+export function isNodeIncluded(node: MutableFieldNode & { type: "field" }) {
+  const includePolicy = node.dynamicProp.includePolicy;
+  return (
+    includePolicy === "always" ||
+    (node.dynamicProp.visible && includePolicy !== "never")
+  );
+}

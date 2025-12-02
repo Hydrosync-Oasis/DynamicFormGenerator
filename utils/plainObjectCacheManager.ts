@@ -47,6 +47,7 @@ class PlainObjectCacheManager {
       node: MutableFieldNode
     ): NodeCache["plainObj"] & ({ type: "hidden" } | { type: "hasValue" }) => {
       const cache = node.cache;
+      const policy = node.dynamicProp.includePolicy;
       if (node.type === "field") {
         const visible = node.dynamicProp.visible;
         const shouldInclude =
@@ -72,25 +73,26 @@ class PlainObjectCacheManager {
         if (cache.plainObj.type !== "dirty") {
           return cache.plainObj;
         }
-        const validateObj: Record<string, any> = {};
+        const objectOnly: Record<string, any> = {};
         const objOnlyIncludesHdn: Record<string, any> = {};
         const submitObj: Record<string, any> = {};
-        const shouldInclude =
-          node.dynamicProp.includePolicy === "always" ||
-          (node.dynamicProp.visible &&
-            node.dynamicProp.includePolicy !== "never");
+        const maybeInclude =
+          policy === "always" ||
+          (node.dynamicProp.visible && policy !== "never") ||
+          policy === "when-children-include";
 
         for (let i of node.children) {
           const res = dfs(i);
           // 一定不是undefined了
           if (res && res.type === "hasValue") {
-            validateObj[i.key] = res.objectOnly;
+            objectOnly[i.key] = res.objectOnly;
             submitObj[i.key] = res.submitData;
           }
           objOnlyIncludesHdn[i.key] = res.objectOnlyIncludesHidden;
         }
 
-        if (shouldInclude) {
+        // 如果可能会被包含在提交数据中
+        if (maybeInclude) {
           // 当当前节点是数组类型时，submitData 需要是一个“仅包含值的数组”（丢弃 key）
           // 为了保证顺序，按 children 顺序收集已有的值
           const submitData =
@@ -101,12 +103,29 @@ class PlainObjectCacheManager {
                   )
                   .map((child) => submitObj[child.key])
               : submitObj;
-          cache.plainObj = {
-            submitData,
-            objectOnly: validateObj,
-            objectOnlyIncludesHidden: objOnlyIncludesHdn,
-            type: "hasValue",
-          };
+
+          if (policy === "when-children-include") {
+            if (Object.keys(submitData).length > 0) {
+              cache.plainObj = {
+                submitData,
+                objectOnly: objectOnly,
+                objectOnlyIncludesHidden: objOnlyIncludesHdn,
+                type: "hasValue",
+              };
+            } else {
+              cache.plainObj = {
+                type: "hidden",
+                objectOnlyIncludesHidden: objOnlyIncludesHdn,
+              };
+            }
+          } else {
+            cache.plainObj = {
+              submitData,
+              objectOnly: objectOnly,
+              objectOnlyIncludesHidden: objOnlyIncludesHdn,
+              type: "hasValue",
+            };
+          }
         } else {
           cache.plainObj = {
             type: "hidden",
@@ -118,7 +137,6 @@ class PlainObjectCacheManager {
       }
     };
 
-    // debugger;
     const res = dfs(this.mutableDataSource);
     this.mutableDataSource.cache.plainObj = res;
     if (res.type === "hasValue") {
