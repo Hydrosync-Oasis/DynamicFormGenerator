@@ -109,8 +109,7 @@ export class DirtyValueCacheManager {
           isDirty: !(
             mayInclude === initialData.hasValue &&
             (!initialData.hasValue ||
-              (Array.isArray(initialData.value) &&
-                node.children.length === initialData.value.length))
+              node.children.length === Object.keys(initialData.value).length)
           ),
           isInclude: mayInclude,
         };
@@ -193,10 +192,10 @@ export class DirtyValueCacheManager {
       const node = nodes[i];
       let key: string | number = node.key;
       if (i > 0) {
-        const last = nodes[i - 1];
-        if (last.type === "array") {
-          key = last.children.findIndex((x) => x.key === node.key);
-        }
+        // const last = nodes[i - 1];
+        // if (last.type === "array") {
+        //   key = last.children.findIndex((x) => x.key === node.key);
+        // }
       }
       if (!(key in currentValue)) {
         hasInitialValue = false;

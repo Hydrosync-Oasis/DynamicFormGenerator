@@ -21,7 +21,7 @@ import {
   FieldSource,
   IncludePolicyNestedField,
 } from "./type";
-import { isChildNode, isSamePath } from "./helper";
+import { getPlainObject, isChildNode, isSamePath } from "./helper";
 import { DirtyValueCacheManager } from "./dirtyValueCacheManager";
 
 interface FormSchema {
@@ -363,7 +363,7 @@ class FormModel {
     this.plainCacheManager.rebuild();
 
     // 生成初始值
-    this._initialValue = this.plainCacheManager.finalData.submitData;
+    this._initialValue = this.plainCacheManager.finalData.validatData;
 
     // 初始化校验器缓存管理器
     this.validatorCacheManager = new ValidatorCacheManager(
@@ -436,9 +436,9 @@ class FormModel {
     }
   }
 
-  loadData(data: any, path: FieldPath = []) {
+  loadData(data: any, path: FieldPath = [], isDirty: boolean = false) {
     this.setValuesInternal(path, data, "source", { invokeEffect: true }, false);
-    const node = this._mutableDataSource;
+    const node = this.findNodeByPath(path);
     if (!node) {
       throw new Error("this node is not found: " + path);
     }
@@ -448,7 +448,7 @@ class FormModel {
       throw new Error("dirty value");
     }
     // data不可信，可能有多余字段，需要从节点出发
-    const newInitialData = node.cache.plainObj.submitData;
+    const newInitialData = node.cache.plainObj.objectOnly;
 
     this._initialValue = newInitialData;
 
@@ -560,7 +560,7 @@ class FormModel {
     );
     this.plainCacheManager.rebuild();
     if (!shouldDirty) {
-      this._initialValue = this.plainCacheManager.finalData.submitData;
+      this._initialValue = this.plainCacheManager.finalData.validatData;
     }
     this.dirtyValueCacheManager.rebuild();
     if (!shouldDirty) {
@@ -1499,12 +1499,27 @@ class FormModel {
   resetFields(path?: FieldPath, shouldNotify: boolean = true) {
     const targetPath = path || [];
     const node = this.findNodeByPath(targetPath);
+    const nodes = this.getNodesOnPath(targetPath, true);
 
-    if (!node) {
+    if (!node || !nodes) {
       throw new Error("the field is not found: " + targetPath.join("."));
     }
+    const res = getPlainObject(this._initialValue, nodes);
 
-    this.setValuesInternal(targetPath);
+    // 改成undefined并不意味着就不是dirty了，如果初始值对象中该字段是不存在的，那么还是dirty，
+    // 仅在这里reset无效，如果该字段可见性是依靠其他字段的值确定的，那么这个字段自然会被删除，
+    // 这时候无论该值设置什么都无所谓了，需要用户定义的规则完备
+    const initialValue = res.hasValue ? res.value : undefined;
+
+    this.setValuesInternal(
+      targetPath,
+      initialValue,
+      "source",
+      {
+        invokeOnChange: true,
+      },
+      true
+    );
 
     // 重建缓存
     this.plainCacheManager.rebuild();
