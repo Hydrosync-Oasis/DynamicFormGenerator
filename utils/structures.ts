@@ -6,7 +6,7 @@ import { ValidatorCacheManager } from "./validatorCacheManager";
 import {
   FieldValue,
   FieldSchema,
-  LeafDynamicProp,
+  LeafFieldDynamicProp,
   FieldPath,
   MutableFieldNode,
   FieldKey,
@@ -17,9 +17,8 @@ import {
   ReactiveEffectContext,
   ReactiveRule,
   FormCommands,
-  IncludePolicyLeafField,
   FieldSource,
-  IncludePolicyNestedField,
+  ValueMergeStrategy,
 } from "./type";
 import { getPlainObject, isChildNode, isSamePath } from "./helper";
 import { DirtyValueCacheManager } from "./dirtyValueCacheManager";
@@ -69,7 +68,8 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       type: "array",
       dynamicProp: {
         visible: item.initialVisible ?? true,
-        includePolicy: item.includePolicy ?? "when-children-include",
+        include: item.include ?? true,
+        removeWhenNoChildren: item.removeWhenNoChildren ?? true,
       },
       staticProp: {
         schema: item.arraySchema!,
@@ -93,7 +93,8 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       type: "object",
       dynamicProp: {
         visible: item.initialVisible ?? true,
-        includePolicy: item.includePolicy ?? "when-children-include",
+        include: item.include ?? true,
+        removeWhenNoChildren: item.removeWhenNoChildren ?? true,
       },
       staticProp: {
         LayoutComponent: item.LayoutComponent,
@@ -117,7 +118,7 @@ function compileOneNode(item: FieldSchema, path: FieldPath): MutableFieldNode {
       dynamicProp: {
         value: item.defaultValue,
         visible: item.initialVisible ?? true,
-        includePolicy: item.includePolicy ?? "when-visible",
+        include: item.include ?? true,
         validation:
           item.validate instanceof ZodType
             ? {
@@ -315,8 +316,6 @@ class FormModel {
       enableEnhancer: boolean,
       ruleSet?: string
     ) => this.validateFieldForRuleset(path, enableEnhancer, ruleSet, true),
-    setIncludePolicy: (path: FieldPath, policy: IncludePolicyLeafField) =>
-      this.setIncludePolicy(path, policy),
   };
 
   get mutableData() {
@@ -335,7 +334,11 @@ class FormModel {
       path: ["dummy"],
       type: "object",
       children: [],
-      dynamicProp: { visible: true, includePolicy: "always" },
+      dynamicProp: {
+        visible: true,
+        include: true,
+        removeWhenNoChildren: false,
+      },
       staticProp: {},
       snapshot: { dirty: true },
       cache: {
@@ -405,7 +408,6 @@ class FormModel {
 
   private notify() {
     for (const fn of this.listeners) fn();
-    // this.currentVersion++;
   }
 
   get(path: FieldPath, prop: "value" | "errorMessage" | "visible"): any {
@@ -437,7 +439,13 @@ class FormModel {
   }
 
   loadData(data: any, path: FieldPath = [], isDirty: boolean = false) {
-    this.setValuesInternal(path, data, "source", { invokeEffect: true }, false);
+    this.setValuesInternal(
+      path,
+      data,
+      "source",
+      { invokeEffect: true },
+      { mode: "replace", clearSource: "initial" }
+    );
     const node = this.findNodeByPath(path);
     if (!node) {
       throw new Error("this node is not found: " + path);
@@ -458,65 +466,39 @@ class FormModel {
 
   setVisible(path: FieldPath, visible: boolean, shouldNotify = false) {
     setMutableNode(this._mutableDataSource, path, (node) => {
-      let submitDataModified = true;
       if (Object.is(node.dynamicProp.visible, visible)) {
         return false;
       }
-      if (node.type === "field") {
-        if (["always", "never"].includes(node.dynamicProp.includePolicy)) {
-          submitDataModified = false;
-        }
-      }
 
       node.dynamicProp.visible = visible;
-      if (submitDataModified) {
-        this.validatorCacheManager.updateNode(node);
-        this.plainCacheManager.updateNode(node);
-        this.dirtyValueCacheManager.updateNode(node);
-        this.dirtyValueCacheManager.rebuild();
-      }
+
+      this.validatorCacheManager.updateNode(node);
+      this.plainCacheManager.updateNode(node);
+      this.dirtyValueCacheManager.updateNode(node);
+      this.dirtyValueCacheManager.rebuild();
     });
     if (shouldNotify) {
       this.notify();
     }
   }
 
-  setIncludePolicy(path: FieldPath, policy: IncludePolicyNestedField) {
-    let submitDataModified = true;
+  setInclude(path: FieldPath, include: boolean) {
     const node = this.findNodeByPath(path);
     if (!node) {
       throw new Error("the field is not found:" + path);
     }
-    if (node.dynamicProp.includePolicy === policy) {
+    if (node.dynamicProp.include === include) {
       return;
     }
 
-    const oldPolicy = node.dynamicProp.includePolicy;
-    const visible = node.dynamicProp.visible;
-    if (
-      visible &&
-      ((policy === "always" && oldPolicy === "when-visible") ||
-        (policy === "when-visible" && oldPolicy === "always"))
-    ) {
-      submitDataModified = false;
-    }
+    node.dynamicProp.include = include;
 
-    if (
-      !visible &&
-      ((policy === "never" && oldPolicy === "when-visible") ||
-        (policy === "when-visible" && oldPolicy === "never"))
-    ) {
-      submitDataModified = false;
-    }
-
-    node.dynamicProp.includePolicy = policy;
-
-    if (submitDataModified) {
-      this.validatorCacheManager.updateNode(node);
-      this.plainCacheManager.updateNode(node);
-      this.dirtyValueCacheManager.updateNode(node);
-      this.dirtyValueCacheManager.rebuild();
-    }
+    // todo
+    // 只是为了调试方便需要实时查看
+    this.validatorCacheManager.updateNode(node);
+    this.plainCacheManager.updateNode(node);
+    this.dirtyValueCacheManager.updateNode(node);
+    this.dirtyValueCacheManager.rebuild();
   }
 
   setValue(
@@ -553,7 +535,7 @@ class FormModel {
         invokeEffect: true,
         invokeOnChange: true,
       },
-      true,
+      undefined,
       (node) => {
         return node.source !== "user";
       }
@@ -656,7 +638,7 @@ class FormModel {
       invokeOnChange?: boolean;
       invokeEffect?: boolean;
     },
-    keepPrevious: boolean = true,
+    keepPrevious: ValueMergeStrategy = { mode: "merge" },
     filter?: (node: MutableFieldNode & { type: "field" }) => boolean
   ) {
     const triggerRules = option?.invokeEffect ?? true;
@@ -670,9 +652,15 @@ class FormModel {
           | number
           | Record<string, any>
           | undefined
-          | null
+          | null,
+        hasValue: boolean
       ): boolean => {
         if (node.type === "field") {
+          // 如果没有值，并且是全量替换，那么还需要设置来源
+          if (!hasValue && keepPrevious.mode === "replace") {
+            node.source = keepPrevious.clearSource;
+          }
+
           // 如果值相同，不更新
           if (Object.is(node.dynamicProp.value, value)) {
             return false;
@@ -700,12 +688,12 @@ class FormModel {
         if (node.type === "object") {
           node.children.forEach((n) => {
             if (typeof value === "object" && value !== null && n.key in value) {
-              if (dfs(n, value[n.key])) {
+              if (dfs(n, value[n.key], true)) {
                 updated = true;
               }
             } else {
               // 如果不保留上次数据，继续传undefined值，清空所有对象
-              if (!keepPrevious && dfs(n, undefined)) {
+              if (!keepPrevious && dfs(n, undefined, false)) {
                 updated = true;
               }
             }
@@ -726,7 +714,7 @@ class FormModel {
               const childNode = node.children.find(
                 (child) => child.key === key
               )!;
-              if (dfs(childNode, v)) {
+              if (dfs(childNode, v, true)) {
                 updated = true;
               }
             } else {
@@ -776,7 +764,7 @@ class FormModel {
       };
       // todo 是否合适
       this.dirtyValueCacheManager.rebuild();
-      return dfs(node, values);
+      return dfs(node, values, true);
     });
 
     if ((option?.invokeOnChange ?? true) && this.onChange) {
@@ -1102,7 +1090,6 @@ class FormModel {
         resetFields: () => void 0,
         insertIntoArray: () => void 0,
         validateField: () => Promise.resolve(),
-        setIncludePolicy: () => void 0,
       },
       "dependencies-collecting"
     );
@@ -1180,31 +1167,6 @@ class FormModel {
         changedPath: depFieldPath,
       });
     }
-  }
-
-  /**
-   * 获取指定节点（可选，默认根）的所有叶子节点路径
-   * @param node 可选的起始节点；若不传则从表单根开始
-   */
-  getAllLeafPaths(node?: MutableFieldNode): FieldPath[] {
-    const result: FieldPath[] = [];
-
-    const collectLeafPaths = (n: MutableFieldNode) => {
-      // 如果是叶子节点（没有子节点或子节点为空）
-      if (n.type === "field") {
-        result.push([...n.path.slice(1)]); // 添加当前节点的路径到结果中
-      }
-      // 如果有子节点，递归处理
-      else if (n.children && n.children.length > 0) {
-        n.children.forEach((child) => {
-          collectLeafPaths(child);
-        });
-      }
-    };
-
-    // 从传入节点或根节点开始
-    collectLeafPaths(node ?? this._mutableDataSource);
-    return result;
   }
 
   /**
@@ -1511,15 +1473,9 @@ class FormModel {
     // 这时候无论该值设置什么都无所谓了，需要用户定义的规则完备
     const initialValue = res.hasValue ? res.value : undefined;
 
-    this.setValuesInternal(
-      targetPath,
-      initialValue,
-      "source",
-      {
-        invokeOnChange: true,
-      },
-      true
-    );
+    this.setValuesInternal(targetPath, initialValue, "source", {
+      invokeOnChange: true,
+    });
 
     // 重建缓存
     this.plainCacheManager.rebuild();
@@ -1538,7 +1494,7 @@ export type {
   FieldValue,
   FieldSchema,
   FormSchema,
-  LeafDynamicProp as FieldState,
+  LeafFieldDynamicProp as FieldState,
   ControlType,
   MutableFieldNode,
   EffectInvokeReason,

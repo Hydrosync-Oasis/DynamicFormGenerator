@@ -80,7 +80,7 @@ export type FormCommands = {
     enableEnhancer: boolean,
     ruleSet?: string
   ) => Promise<void>;
-  setIncludePolicy: (path: FieldPath, policy: IncludePolicyLeafField) => void;
+  // setIncludePolicy: (path: FieldPath, policy: IncludePolicyLeafField) => void;
 };
 
 export interface ReactiveRule {
@@ -93,17 +93,6 @@ export type ReactiveEffect = (
   cause: EffectInvokeReason,
   info?: { changedPath?: FieldPath }
 ) => void;
-
-/**
- * Defines when a field should be included in the form's data export.
- * - "always": Always include the field, regardless of visibility.
- * - "never": Never include the field, even if visible.
- * - "when-visible": Include the field only if it is currently visible.
- */
-export type IncludePolicyLeafField = "always" | "never" | "when-visible";
-export type IncludePolicyNestedField =
-  | IncludePolicyLeafField
-  | "when-children-include";
 
 export type FieldSource = "initial" | "user" | "source";
 
@@ -181,9 +170,9 @@ export type FieldSchema =
             onSubmit?: ZodType;
           };
       initialVisible?: boolean;
+      include?: boolean;
       controlProps?: Record<string, unknown>;
       defaultValue?: FieldValue;
-      includePolicy?: IncludePolicyLeafField;
       helpTip?: string | JSX.Element;
       FieldDisplayComponent?: React.ElementType<{
         state: ImmutableFormState;
@@ -196,7 +185,8 @@ export type FieldSchema =
       key: FieldKey;
       isArray: true;
       initialVisible?: boolean;
-      includePolicy?: IncludePolicyNestedField;
+      include?: boolean;
+      removeWhenNoChildren?: boolean;
       arraySchema: Omit<FieldSchema, "key">;
       LayoutComponent?: React.ElementType<{
         render: (state: ImmutableFormState) => React.ReactNode;
@@ -209,7 +199,8 @@ export type FieldSchema =
       key: FieldKey;
       isArray: false;
       initialVisible?: boolean;
-      includePolicy?: IncludePolicyNestedField;
+      include?: boolean;
+      removeWhenNoChildren?: boolean;
       childrenFields: FieldSchema[];
       LayoutComponent?: React.ElementType<{
         render: (state: ImmutableFormState) => React.ReactNode;
@@ -219,10 +210,10 @@ export type FieldSchema =
     };
 
 // 存放字段运行时的响应式字段
-export interface LeafDynamicProp {
+export interface LeafFieldDynamicProp {
   value?: FieldValue;
   visible: boolean; // 是否显示，响应式触发
-  includePolicy: IncludePolicyLeafField; // 控制是否包含在导出数据中
+  include: boolean;
   alertTip?: React.ReactNode;
   errorMessage: {
     [ruleSet: string]: string[] | undefined;
@@ -257,7 +248,8 @@ export interface NestedFieldStaticProp {
 export interface NestedFieldDynamicProp {
   validationRefine?: { [ruleSet: string]: (z: ZodType) => ZodType };
   visible: boolean;
-  includePolicy: IncludePolicyNestedField;
+  include: boolean;
+  removeWhenNoChildren: boolean;
 }
 
 type MutableFieldNodeBaseType = {
@@ -322,7 +314,6 @@ export type NodeCache = {
   dirty:
     | {
         isDirty: boolean;
-        isInclude: boolean;
       }
     | "dirty";
 };
@@ -331,7 +322,7 @@ export type MutableFieldNode = MutableFieldNodeBaseType &
   (
     | {
         type: "field";
-        dynamicProp: LeafDynamicProp;
+        dynamicProp: LeafFieldDynamicProp;
         staticProp: LeafFieldStaticProp;
         source: FieldSource;
         /** 字段运行时的响应式字段，如果字段是isArray: true的子节点，则无效 */
@@ -395,4 +386,31 @@ export type ImmutableFormState =
         state: ImmutableFormState;
         formCommands: FormCommands;
       }>;
+    };
+
+export type ValueMergeStrategy =
+  | { mode: "merge" }
+  | {
+      mode: "replace";
+      clearSource: FieldSource;
+    };
+
+export type InitialValueObject =
+  | {
+      type: "leaf";
+      key: string;
+      value: any;
+      include: boolean;
+    }
+  | {
+      type: "object";
+      key: string;
+      children: InitialValueObject[];
+      include: boolean;
+    }
+  | {
+      type: "array";
+      key: string;
+      children: InitialValueObject[];
+      include: boolean;
     };

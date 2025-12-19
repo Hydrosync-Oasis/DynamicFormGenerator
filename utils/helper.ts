@@ -52,18 +52,10 @@ export const findNodeByPath = (
   return findNodeByPath(child, rest);
 };
 
-export function isNodeIncluded(node: MutableFieldNode & { type: "field" }) {
-  const includePolicy = node.dynamicProp.includePolicy;
-  return (
-    includePolicy === "always" ||
-    (node.dynamicProp.visible && includePolicy !== "never")
-  );
-}
-
 /**
  *
  * @param plainObject
- * @param nodes 包含dummy节点的路径所有节点
+ * @param nodes 包含dummy节点的路径节点
  * @returns
  */
 export function getPlainObject(
@@ -83,21 +75,12 @@ export function getPlainObject(
 
   let resObj = plainObject;
   for (let i = 1; i < nodes.length; i++) {
-    let prevNode = nodes[i - 1];
     let curNode = nodes[i];
 
-    // if (prevNode.type === "array") {
-    //   const index = prevNode.children.findIndex((x) => x.key === curNode.key);
-    //   if (!(index in resObj)) {
-    //     return { hasValue: false };
-    //   }
-    //   resObj = resObj[index];
-    // } else {
     if (!(curNode.key in resObj)) {
       return { hasValue: false };
     }
     resObj = resObj[curNode.key];
-    // }
   }
   return {
     hasValue: true,
@@ -119,20 +102,11 @@ export function setPlainObject(
   for (let i = 1; i < nodes.length - 1; i++) {
     let curNode = nodes[i];
 
-    // if (prevNode.type === "array") {
-    //   const index = prevNode.children.findIndex((x) => x.key === curNode.key);
-    //   if (!(index in resObj)) {
-    //     // 根据当前节点类型创建对象或数组
-    //     resObj[index] = {};
-    //   }
-    //   resObj = resObj[index];
-    // } else {
     if (!(curNode.key in resObj)) {
       // 根据当前节点类型创建对象或数组
       resObj[curNode.key] = {};
     }
     resObj = resObj[curNode.key];
-    // }
   }
 
   // 设置最后一个节点的值

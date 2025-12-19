@@ -141,7 +141,7 @@ export default function Page() {
             <Space wrap>
               <Button
                 onClick={() => {
-                  model.current.setIncludePolicy(["obj", "test1"], "always");
+                  model.current.setInclude(["obj", "test1"], "always");
                   message.info("test1 策略已设为 always");
                 }}
               >
@@ -149,10 +149,7 @@ export default function Page() {
               </Button>
               <Button
                 onClick={() => {
-                  model.current.setIncludePolicy(
-                    ["obj", "test1"],
-                    "when-visible"
-                  );
+                  model.current.setInclude(["obj", "test1"], "when-visible");
                   message.info("test1 策略已设为 when-visible");
                 }}
               >
@@ -160,7 +157,7 @@ export default function Page() {
               </Button>
               <Button
                 onClick={() => {
-                  model.current.setIncludePolicy(["obj", "test1"], "never");
+                  model.current.setInclude(["obj", "test1"], "never");
                   message.info("test1 策略已设为 never");
                 }}
               >
@@ -168,7 +165,7 @@ export default function Page() {
               </Button>
               <Button
                 onClick={() => {
-                  model.current.setIncludePolicy(["obj", "test2"], "always");
+                  model.current.setInclude(["obj", "test2"], "always");
                   message.info("test2 策略已设为 always");
                 }}
               >
@@ -176,10 +173,7 @@ export default function Page() {
               </Button>
               <Button
                 onClick={() => {
-                  model.current.setIncludePolicy(
-                    ["obj", "test2"],
-                    "when-visible"
-                  );
+                  model.current.setInclude(["obj", "test2"], "when-visible");
                   message.info("test2 策略已设为 when-visible");
                 }}
               >
@@ -187,7 +181,7 @@ export default function Page() {
               </Button>
               <Button
                 onClick={() => {
-                  model.current.setIncludePolicy(["obj", "test2"], "never");
+                  model.current.setInclude(["obj", "test2"], "never");
                   message.info("test2 策略已设为 never");
                 }}
               >
@@ -201,10 +195,7 @@ export default function Page() {
               <Button
                 onClick={() => {
                   model.current.setVisible(["obj", "test1"], false, true);
-                  model.current.setIncludePolicy(
-                    ["obj", "test1"],
-                    "when-visible"
-                  );
+                  model.current.setInclude(["obj", "test1"], "when-visible");
                   message.info("test1: 隐藏 + when-visible (不应包含在提交中)");
                 }}
                 type="dashed"
@@ -214,7 +205,7 @@ export default function Page() {
               <Button
                 onClick={() => {
                   model.current.setVisible(["obj", "test1"], false, true);
-                  model.current.setIncludePolicy(["obj", "test1"], "always");
+                  model.current.setInclude(["obj", "test1"], "always");
                   message.info("test1: 隐藏 + always (应包含在提交中)");
                 }}
                 type="dashed"
@@ -224,7 +215,7 @@ export default function Page() {
               <Button
                 onClick={() => {
                   model.current.setVisible(["obj", "test1"], true, true);
-                  model.current.setIncludePolicy(["obj", "test1"], "never");
+                  model.current.setInclude(["obj", "test1"], "never");
                   message.info("test1: 显示 + never (不应包含在提交中)");
                 }}
                 type="dashed"
@@ -236,9 +227,9 @@ export default function Page() {
                   model.current.setVisible(["obj", "test1"], true);
                   model.current.setVisible(["obj", "test2"], true);
                   model.current.setVisible(["obj", "test3"], true, true);
-                  model.current.setIncludePolicy(["obj", "test1"], "always");
-                  model.current.setIncludePolicy(["obj", "test2"], "always");
-                  model.current.setIncludePolicy(["obj", "test3"], "always");
+                  model.current.setInclude(["obj", "test1"], "always");
+                  model.current.setInclude(["obj", "test2"], "always");
+                  model.current.setInclude(["obj", "test3"], "always");
                   message.info("重置: 全部显示 + always");
                 }}
                 type="primary"

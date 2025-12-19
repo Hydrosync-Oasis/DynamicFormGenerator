@@ -72,12 +72,9 @@ class ValidatorCacheManager {
         }
       | "hidden" => {
       const cache = node.cache;
-      const policy = node.dynamicProp.includePolicy;
+      const include = node.dynamicProp.include;
 
       if (node.type === "field") {
-        const visible = node.dynamicProp.visible;
-        const shouldInclude =
-          (visible && policy !== "never") || policy === "always";
         let res:
           | {
               [ruleSet: string]: { type: "hasValue"; validator: ZodType };
@@ -87,7 +84,7 @@ class ValidatorCacheManager {
             return [rSet, { type: "hasValue", validator: v }];
           })
         );
-        if (!shouldInclude) {
+        if (!include) {
           res = "hidden";
         }
         cache.validator = res;
@@ -108,13 +105,7 @@ class ValidatorCacheManager {
             | "hidden";
         }
 
-        const maybeInclude =
-          (node.dynamicProp.visible && policy !== "never") ||
-          policy === "always" ||
-          // 有可能include，比如自己不可见但子节点存在
-          policy === "when-children-include";
-
-        if (!maybeInclude) {
+        if (!include) {
           return "hidden";
         }
 
@@ -134,54 +125,41 @@ class ValidatorCacheManager {
           });
         }
 
-        if (Object.keys(validatorMap).length > 0) {
-          let validator: {
-            [ruleSet: string]: {
-              type: "hasValue";
-              validator: ZodType;
-            };
+        let validator: {
+          [ruleSet: string]: {
+            type: "hasValue";
+            validator: ZodType;
           };
+        };
 
-          // 不管是不是数组都当对象校验，因为不确定数组的每个元素结构都一致（比如有的数组项visible为false）
-          validator = Object.fromEntries(
-            Object.entries(validatorMap).map(([ruleSet, v]) => {
-              return [ruleSet, { type: "hasValue", validator: z.object(v) }];
-            })
-          );
+        // 不管是不是数组都当对象校验，因为不确定数组的每个元素结构都一致（比如有的数组项include为false）
+        validator = Object.fromEntries(
+          Object.entries(validatorMap).map(([ruleSet, v]) => {
+            return [ruleSet, { type: "hasValue", validator: z.object(v) }];
+          })
+        );
 
-          // 应用自定义的 refine（如果存在）
-          // 需要求字节点中出现的RuleSet和当前节点的refiner里出现的RuleSet的并集
-          const set = new Set<string>();
-          Object.entries(validator).forEach(([ruleSet, v]) => {
-            const refineFn = node.dynamicProp.validationRefine?.[ruleSet];
-            set.add(ruleSet);
-            if (refineFn) {
-              v.validator = refineFn(v.validator);
-            }
-          });
-          const refiners = node.dynamicProp.validationRefine;
-          for (let ruleSet in refiners) {
-            if (!set.has(ruleSet)) {
-              // 说明该ruleSet下没有子字段约束，只有refine约束
-              validator[ruleSet] = {
-                type: "hasValue",
-                validator: refiners[ruleSet](z.any()),
-              };
-            }
-          }
+        // 应用自定义的 refine（如果存在）
+        // 需要求字节点中出现的RuleSet和当前节点的refiner里出现的RuleSet的并集
+        const refiners = node.dynamicProp.validationRefine;
+        for (let ruleSet in refiners) {
+          // 说明该ruleSet下没有子字段约束，只有refine约束
+          validator[ruleSet] = {
+            type: "hasValue",
+            validator: refiners[ruleSet](
+              ruleSet in validator ? validator[ruleSet].validator : z.any()
+            ),
+          };
+        }
 
-          cache.validator = validator;
-        } else {
-          if (policy === "always") {
-            // 嵌套节点本身可见，但没有子节点，仍然应该有校验规则
-            cache.validator = {
-              default: { type: "hasValue", validator: z.object() },
-            };
-          } else if (policy === "when-children-include") {
-            return "hidden";
-          } else {
-            throw new Error("不应该为never");
-          }
+        cache.validator = validator;
+
+        // 还需要检查后代是否没有任何校验规则
+        if (include && Object.keys(validatorMap).length === 0) {
+          // 嵌套节点本身可见，但没有子节点，仍然应该有校验规则
+          cache.validator = {
+            default: { type: "hasValue", validator: z.object() },
+          };
         }
 
         return cache.validator as

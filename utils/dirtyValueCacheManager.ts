@@ -1,4 +1,3 @@
-import { isNodeIncluded } from "./helper";
 import { FormModel, getNodesOnPath } from "./structures";
 import { FieldPath, MutableFieldNode, NodeCache } from "./type";
 
@@ -23,11 +22,10 @@ export class DirtyValueCacheManager {
             value: any;
           }
     ): Exclude<NodeCache["dirty"], "dirty"> => {
+      const include = node.dynamicProp.include;
       if (node.type === "field") {
         // 比较include，以及值
-        const include = isNodeIncluded(node);
         node.cache.dirty = {
-          isInclude: include,
           isDirty: !(
             initialData.hasValue === include &&
             (!initialData.hasValue ||
@@ -42,14 +40,7 @@ export class DirtyValueCacheManager {
       }
 
       if (node.type === "object") {
-        let mayInclude =
-          (node.dynamicProp.visible &&
-            node.dynamicProp.includePolicy !== "never") ||
-          node.dynamicProp.includePolicy === "always" ||
-          node.dynamicProp.includePolicy === "when-children-include";
-
         let childDirty = false;
-        let childInclude = false;
         for (let i = 0; i < node.children.length; i++) {
           const curNode = node.children[i];
           const hasInitialValue =
@@ -61,32 +52,18 @@ export class DirtyValueCacheManager {
               : undefined,
           });
           childDirty = childDirty || res.isDirty;
-          childInclude = childInclude || res.isInclude;
-        }
-        if (
-          node.dynamicProp.includePolicy === "when-children-include" &&
-          !childInclude
-        ) {
-          mayInclude = false;
         }
 
         node.cache.dirty = {
-          isDirty: !(mayInclude === initialData.hasValue) || childDirty,
-          isInclude: mayInclude,
+          isDirty: !(include === initialData.hasValue) || childDirty,
         };
 
         return node.cache.dirty;
       }
 
       if (node.type === "array") {
-        let mayInclude =
-          (node.dynamicProp.visible &&
-            node.dynamicProp.includePolicy !== "never") ||
-          node.dynamicProp.includePolicy === "always";
-
         // 如果是true，一定是include，如果是false，也不一定就不包含
         let childDirty = false;
-        let childInclude = false;
         for (let i = 0; i < node.children.length; i++) {
           const curNode = node.children[i];
           const hasInitialValue =
@@ -96,24 +73,15 @@ export class DirtyValueCacheManager {
             value: initialData.hasValue ? initialData.value[i] : undefined,
           });
           childDirty = childDirty || res.isDirty;
-          childInclude = childInclude || res.isInclude;
-        }
-        if (
-          !childInclude &&
-          node.dynamicProp.includePolicy === "when-children-include"
-        ) {
-          mayInclude = false;
         }
 
         node.cache.dirty = {
           isDirty: !(
-            mayInclude === initialData.hasValue &&
+            include === initialData.hasValue &&
             (!initialData.hasValue ||
               node.children.length === Object.keys(initialData.value).length)
           ),
-          isInclude: mayInclude,
         };
-        // debugger;
 
         return node.cache.dirty;
       }
@@ -177,7 +145,7 @@ export class DirtyValueCacheManager {
       if (dirtyCache === "dirty") {
         throw new Error("dirty value");
       }
-      include = include && dirtyCache.isInclude;
+      include = include && nodes[i].dynamicProp.include;
       if (!include) {
         break;
       }
@@ -203,7 +171,7 @@ export class DirtyValueCacheManager {
       }
       currentValue = currentValue[key];
     }
-    // debugger;
+
     return !(hasInitialValue === include && !node.cache.dirty.isDirty);
   }
 }
