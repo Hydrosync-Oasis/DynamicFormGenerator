@@ -1296,7 +1296,7 @@ class FormModel {
     this.validatorCacheManager.rebuild();
     let finalError: ZodError | undefined = undefined;
     if (!enableEnhancer) {
-      setMutableNode(this._mutableDataSource, path, (node, _nodes, update) => {
+      setMutableNode(this._mutableDataSource, path, (node, _nodes, mutate) => {
         const validator = node.cache.validator;
         if (validator === "dirty") {
           throw new Error("dirty value");
@@ -1306,8 +1306,13 @@ class FormModel {
         }
 
         if (node.type === "field") {
+          const oldMsg = node.dynamicProp.errorMessage[ruleSet];
+
           if (node.dynamicProp.validation[ruleSet] === undefined) {
             // 没有校验器，直接返回
+            if (oldMsg === undefined) {
+              return false;
+            }
             node.dynamicProp.errorMessage[ruleSet] = undefined;
             return;
           }
@@ -1316,6 +1321,9 @@ class FormModel {
             node.dynamicProp.value
           );
           if (res?.success) {
+            if (oldMsg === undefined) {
+              return false;
+            }
             node.dynamicProp.errorMessage[ruleSet] = undefined;
           } else {
             // 只保留第一个错误信息
@@ -1342,7 +1350,11 @@ class FormModel {
             const errorIssues = res.error?.issues;
             const errorInfo = errorIssues;
 
-            const dfs = (node: MutableFieldNode) => {
+            if (!res.success && errorInfo) {
+              finalError = new ZodError(errorInfo);
+            }
+
+            const dfs = (node: MutableFieldNode): boolean => {
               if (node.type === "field") {
                 const info = errorInfo?.filter((e) => {
                   return isSamePath(
@@ -1351,26 +1363,32 @@ class FormModel {
                   );
                 });
 
-                if (!info) {
+                if (!info || info.length === 0) {
+                  if (node.dynamicProp.errorMessage[ruleSet] === undefined) {
+                    return false;
+                  }
                   node.dynamicProp.errorMessage[ruleSet] = undefined;
                 } else {
                   node.dynamicProp.errorMessage[ruleSet] = info.map(
                     (i) => i.message
                   );
                 }
-                update(node);
-                return;
+
+                mutate(node);
+                return true;
               }
 
+              let hasMutated = false;
               for (let i of node.children) {
-                dfs(i);
-                update(i);
+                if (dfs(i)) {
+                  mutate(node);
+                  hasMutated = true;
+                }
               }
+              return hasMutated;
             };
-            dfs(node);
-            if (!res.success && errorInfo) {
-              finalError = new ZodError(errorInfo);
-            }
+            const shouldDirty = dfs(node);
+            return shouldDirty;
           } else if (validation.type === "dirty" || plainObj.type === "dirty") {
             throw new Error("dirty value");
           }
@@ -1408,23 +1426,30 @@ class FormModel {
                   const msg = info?.filter((x) => {
                     return isSamePath(x.path as string[], node.path.slice(1));
                   });
-                  node.dynamicProp.errorMessage[ruleSet] = msg?.map(
-                    (i) => i.message
-                  );
-                  mutate(node);
-                  return true;
+                  if (
+                    node.dynamicProp.errorMessage[ruleSet] === undefined &&
+                    (msg === undefined || msg.length === 0)
+                  ) {
+                    return false;
+                  } else {
+                    node.dynamicProp.errorMessage[ruleSet] = msg?.map(
+                      (i) => i.message
+                    );
+                    mutate(node);
+                    return true;
+                  }
                 }
                 return false;
               }
 
-              let hasMutate = false;
+              let hasMutated = false;
               for (let i of node.children) {
                 if (dfs(i)) {
                   mutate(i);
-                  hasMutate = true;
+                  hasMutated = true;
                 }
               }
-              return hasMutate;
+              return hasMutated;
             };
             dfs(node);
           }
@@ -1447,7 +1472,7 @@ class FormModel {
   async validateAllFields(): Promise<any> {
     // 在校验前先收集最终对象
     try {
-      await this.validateField([], false);
+      await this.validateField([], true);
     } finally {
       this.notify();
     }
