@@ -1,4 +1,14 @@
-import { FieldPath, ImmutableFormState, MutableFieldNode } from "./type";
+import z, { ZodType } from "zod";
+import {
+  AnyMutableFieldNode,
+  DistributiveOmit,
+  FieldPath,
+  FieldSchema,
+  FieldSource,
+  ImmutableFormState,
+  MutableFieldNode,
+  MutableNestedFieldNode,
+} from "./type";
 
 export function isChildNode(path1: FieldPath, path2: FieldPath): boolean {
   if (path1.length < path2.length) {
@@ -28,7 +38,7 @@ export function isSamePath(path1: FieldPath, path2: FieldPath): boolean {
 // 根据路径从 state 中查找节点
 export const findNodeByPath = (
   node: ImmutableFormState,
-  path: FieldPath
+  path: FieldPath,
 ): ImmutableFormState | null => {
   if (path.length === 0) {
     return node;
@@ -52,73 +62,183 @@ export const findNodeByPath = (
   return findNodeByPath(child, rest);
 };
 
-/**
- *
- * @param plainObject
- * @param nodes 包含dummy节点的路径节点
- * @returns
- */
-export function getPlainObject(
-  plainObject: any,
-  nodes: MutableFieldNode[]
-):
-  | {
-      hasValue: true;
-      value: any;
-    }
-  | {
-      hasValue: false;
-    } {
-  if (nodes.length === 1) {
-    return plainObject;
-  }
-
-  let resObj = plainObject;
-  for (let i = 1; i < nodes.length; i++) {
-    let curNode = nodes[i];
-
-    if (!(curNode.key in resObj)) {
-      return { hasValue: false };
-    }
-    resObj = resObj[curNode.key];
-  }
-  return {
-    hasValue: true,
-    value: resObj,
-  };
-}
-
-export function setPlainObject(
-  plainObject: { ref: any },
-  nodes: MutableFieldNode[],
-  newObject: any
-) {
-  if (nodes.length === 1) {
-    plainObject.ref = newObject;
-    return;
-  }
-
-  let resObj = plainObject.ref;
-  for (let i = 1; i < nodes.length - 1; i++) {
-    let curNode = nodes[i];
-
-    if (!(curNode.key in resObj)) {
-      // 根据当前节点类型创建对象或数组
-      resObj[curNode.key] = {};
-    }
-    resObj = resObj[curNode.key];
-  }
-
-  // 设置最后一个节点的值
-  const lastNode = nodes[nodes.length - 1];
-  const secondLastNode = nodes[nodes.length - 2];
-
-  if (secondLastNode.type === "array") {
-    const index = secondLastNode.children.findIndex(
-      (x) => x.key === lastNode.key
-    );
-    resObj[index] = newObject;
+export function compileOneMutableNode(
+  item: FieldSchema,
+  path: FieldPath,
+  parent: MutableNestedFieldNode,
+  dirty?: boolean,
+): AnyMutableFieldNode {
+  if ("isArray" in item && item.isArray) {
+    return {
+      key: item.key,
+      path: path,
+      type: "array",
+      parent,
+      dynamicProp: {
+        visible: item.initialVisible ?? true,
+        include: item.include ?? true,
+        removeWhenNoChildren: item.removeWhenNoChildren ?? true,
+      },
+      staticProp: {
+        schema: item.arraySchema!,
+        LayoutComponent: item.LayoutComponent,
+      },
+      children: [],
+      snapshot: {
+        dirty: "uninitialized",
+      },
+      effect: new Set(),
+      cache: {
+        plainObj: { type: "dirty", lastValue: { include: false } },
+        validator: "dirty",
+        selfDirty: dirty ?? false,
+      },
+    };
+  } else if ("isArray" in item && !item.isArray) {
+    return {
+      key: item.key,
+      path: path,
+      type: "object",
+      parent,
+      dynamicProp: {
+        visible: item.initialVisible ?? true,
+        include: item.include ?? true,
+        removeWhenNoChildren: item.removeWhenNoChildren ?? true,
+      },
+      staticProp: {
+        LayoutComponent: item.LayoutComponent,
+      },
+      snapshot: {
+        dirty: "uninitialized",
+      },
+      children: [],
+      cache: {
+        plainObj: { type: "dirty", lastValue: { include: false } },
+        validator: "dirty",
+        selfDirty: dirty ?? false,
+      },
+    };
   } else {
-    resObj[lastNode.key] = newObject;
+    return {
+      key: item.key,
+      path: path,
+      type: "field",
+      source: "initial",
+      parent,
+      dynamicProp: {
+        value: item.defaultValue,
+        visible: item.initialVisible ?? true,
+        include: item.include ?? true,
+        validation:
+          item.validate instanceof ZodType
+            ? {
+                onChange: item.validate || z.unknown(),
+              }
+            : item.validate || { onChange: z.unknown() },
+        required: true,
+        controlProp: item.controlProps,
+        errorMessage: {},
+      },
+      staticProp: {
+        label: item.label,
+        toolTip: item.helpTip,
+        control: item.control,
+        FieldDisplayComponent: item.FieldDisplayComponent,
+      },
+      snapshot: {
+        dirty: "uninitialized",
+      },
+      effect: new Set(),
+      cache: {
+        plainObj: { type: "dirty", lastValue: { include: false } },
+        validator: "dirty",
+        selfDirty: dirty ?? false,
+      },
+    };
   }
 }
+
+/**
+ * 全量编译schema为可变节点，不保留任何旧信息，适用于初次设置
+ * @param value
+ * @param schema
+ * @param path
+ * @param rootArrayField
+ * @returns 最终生成的可变节点
+ */
+export const compileArrayMutableNode = (
+  value: Record<string, any> | undefined,
+  schema: FieldSchema,
+  path: FieldPath,
+  rootArrayField: MutableFieldNode<"array">,
+  source: FieldSource,
+  parentNode: MutableNestedFieldNode,
+): AnyMutableFieldNode => {
+  if (!("isArray" in schema)) {
+    // 返回一个field type的节点
+    const field = compileOneMutableNode(schema, path, parentNode);
+    if (field.type !== "field") {
+      throw new Error("schema mismatch for field node");
+    }
+    field.rootArrayField = rootArrayField;
+    field.dynamicProp.value = value;
+    field.source = source;
+
+    return field;
+  }
+
+  const children: AnyMutableFieldNode[] = [];
+  if (schema.isArray) {
+    const node = compileOneMutableNode(
+      schema,
+      path,
+      parentNode,
+    ) as MutableFieldNode<"array">;
+    node.children = children;
+    node.rootArrayField = rootArrayField;
+    // value输入可以是数组，也可以是一个对象，如果是对象，那么对象的key就是字段的key
+    Object.entries(value || {}).forEach(([key, v]) => {
+      const childSchema: FieldSchema = {
+        ...schema.arraySchema,
+        key: key,
+      } as FieldSchema;
+      children.push(
+        compileArrayMutableNode(
+          v,
+          childSchema,
+          [...path, key],
+          rootArrayField,
+          source,
+          node,
+        ),
+      );
+    });
+
+    return node;
+  } else {
+    // 是object
+    const node = compileOneMutableNode(
+      schema,
+      path,
+      parentNode,
+    ) as MutableFieldNode<"object">;
+    node.children = children;
+    node.rootArrayField = rootArrayField;
+    // value输入是一个对象，遍历schema来从value中取值
+    schema.childrenFields!.forEach((childSchema) => {
+      const k = childSchema.key;
+      const v = value?.[k];
+      children.push(
+        compileArrayMutableNode(
+          v,
+          childSchema,
+          [...path, k],
+          rootArrayField,
+          source,
+          node,
+        ),
+      );
+    });
+    return node;
+  }
+};

@@ -60,7 +60,7 @@ export default function DynamicExamplePage() {
         },
       ] satisfies FieldSchema[],
     }),
-    []
+    [],
   );
 
   // 2) 初始化模型 & Hook
@@ -90,10 +90,10 @@ export default function DynamicExamplePage() {
             message: "结束年龄必须 ≥ 起始年龄",
           });
         }
-      })
+      }),
     );
 
-    const stop = model.registerRule((ctx) => {
+    model.registerRule((ctx) => {
       const userType = ctx.track(["userType"]);
       // 条件显示：企业显示公司名
       ctx.setVisible(["companyName"], userType === "company");
@@ -101,7 +101,7 @@ export default function DynamicExamplePage() {
       if (userType === "company") {
         ctx.setValidation(
           ["companyName"],
-          z.string().min(1, { message: "请输入公司名称" })
+          z.string().min(1, { message: "请输入公司名称" }),
         );
       } else {
         ctx.setValidation(["companyName"], z.string().optional());
@@ -110,14 +110,13 @@ export default function DynamicExamplePage() {
 
     // 初始化一次，让规则先跑
     model.initial();
-
-    return () => stop();
+    console.log(model);
   }, []);
 
   // 4) 展示字段顺序
   const displayFields: FieldPath[] = useMemo(
     () => [["userType"], ["companyName"], ["startAge"], ["endAge"]],
-    []
+    [],
   );
 
   // 5) 交互
@@ -138,7 +137,7 @@ export default function DynamicExamplePage() {
         <Generator
           model={model}
           displayFields={displayFields}
-          displayOption={{ labelSpan: 6, fieldSpan: 18, showDebug: true }}
+          displayOption={{ showDebug: true }}
         />
         <Divider />
         <Space>

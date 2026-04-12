@@ -63,7 +63,7 @@ export default function NestedArrayExamplePage() {
           {state.children.map((child: any) => render(child))}
         </div>
       );
-    }
+    },
   );
 
   DepartmentsFlexLayout.displayName = "DepartmentsFlexLayout";
@@ -99,7 +99,7 @@ export default function NestedArrayExamplePage() {
           },
           "after",
           undefined,
-          true
+          true,
         );
         message.success(`已为部门 ${deptKey} 添加新员工`);
       };
@@ -133,7 +133,7 @@ export default function NestedArrayExamplePage() {
           {state.children.map((child: any) => render(child))}
         </Card>
       );
-    }
+    },
   );
 
   DepartmentCardLayout.displayName = "DepartmentCardLayout";
@@ -162,7 +162,7 @@ export default function NestedArrayExamplePage() {
           {state.children.map((child: any) => render(child))}
         </div>
       );
-    }
+    },
   );
 
   EmployeesFlexLayout.displayName = "EmployeesFlexLayout";
@@ -197,7 +197,7 @@ export default function NestedArrayExamplePage() {
             },
           },
           undefined,
-          "after"
+          "after",
         );
         message.success(`已为员工 ${empKey} 添加新项目`);
       };
@@ -233,7 +233,7 @@ export default function NestedArrayExamplePage() {
           {state.children.map((child: any) => render(child))}
         </Card>
       );
-    }
+    },
   );
 
   EmployeeCardLayout.displayName = "EmployeeCardLayout";
@@ -263,7 +263,7 @@ export default function NestedArrayExamplePage() {
           {state.children.map((child: any) => render(child))}
         </div>
       );
-    }
+    },
   );
 
   ProjectsListLayout.displayName = "ProjectsListLayout";
@@ -302,7 +302,7 @@ export default function NestedArrayExamplePage() {
           {state.children.map((child: any) => render(child))}
         </Card>
       );
-    }
+    },
   );
 
   ProjectCardLayout.displayName = "ProjectCardLayout";
@@ -356,7 +356,7 @@ export default function NestedArrayExamplePage() {
                       const num = parseFloat(val);
                       return num > 0;
                     },
-                    { message: "预算必须大于0" }
+                    { message: "预算必须大于0" },
                   ),
                 FieldDisplayComponent: WiderLabelField,
               },
@@ -403,7 +403,7 @@ export default function NestedArrayExamplePage() {
                           "designer",
                           "analyst",
                         ],
-                        { message: "请选择职位" }
+                        { message: "请选择职位" },
                       ),
                       FieldDisplayComponent: ExtraWiderLabelField,
                     },
@@ -423,7 +423,7 @@ export default function NestedArrayExamplePage() {
                             const num = parseFloat(val);
                             return num > 0;
                           },
-                          { message: "月薪必须大于0" }
+                          { message: "月薪必须大于0" },
                         ),
                       FieldDisplayComponent: ExtraWiderLabelField,
                     },
@@ -462,7 +462,7 @@ export default function NestedArrayExamplePage() {
                             defaultValue: "ongoing",
                             validate: z.enum(
                               ["ongoing", "completed", "paused"],
-                              { message: "请选择项目状态" }
+                              { message: "请选择项目状态" },
                             ),
                             FieldDisplayComponent: ExtraWiderLabelField,
                           },
@@ -482,7 +482,7 @@ export default function NestedArrayExamplePage() {
                                   const num = parseFloat(val);
                                   return num >= 0 && num <= 100;
                                 },
-                                { message: "进度必须在0-100之间" }
+                                { message: "进度必须在0-100之间" },
                               ),
                             FieldDisplayComponent: ExtraWiderLabelField,
                           },
@@ -493,11 +493,11 @@ export default function NestedArrayExamplePage() {
                 },
               },
             ],
-          } as Omit<FieldSchema, "key">,
+          },
         },
       ] satisfies FieldSchema[],
     }),
-    []
+    [],
   );
 
   // 初始化模型 & Hook
@@ -597,7 +597,7 @@ export default function NestedArrayExamplePage() {
               if (tip) {
                 ctx.setAlertTip(
                   ["departments", deptKey, "employees", empKey, "salary"],
-                  tip
+                  tip,
                 );
               }
             }
@@ -607,14 +607,12 @@ export default function NestedArrayExamplePage() {
     });
 
     model.initial();
-
-    return () => stop();
   }, [model, form]);
 
   // 展示字段顺序
   const displayFields: FieldPath[] = useMemo(
     () => [["companyName"], ["departments"]],
-    []
+    [],
   );
 
   // 交互
@@ -648,7 +646,7 @@ export default function NestedArrayExamplePage() {
       },
       undefined,
       "after",
-      true
+      true,
     );
     message.success("已添加新部门");
   };
@@ -672,7 +670,7 @@ export default function NestedArrayExamplePage() {
           },
           "after",
           undefined,
-          true
+          true,
         );
         message.success("已添加新员工到第一个部门");
       } else {
@@ -711,7 +709,7 @@ export default function NestedArrayExamplePage() {
               },
               "after",
               undefined,
-              true
+              true,
             );
             message.success("已添加新项目到第一个员工");
           } else {

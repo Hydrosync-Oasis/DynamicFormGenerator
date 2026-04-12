@@ -1,5 +1,6 @@
 import { ZodType } from "zod";
 import { ComponentType } from "react";
+import { BootstrapScriptDescriptor } from "react-dom/server";
 
 export type FieldKey = string;
 
@@ -29,58 +30,37 @@ export type ReactiveEffectContext = FormCommands & {
 };
 
 export type FormCommands = {
-  /**
-   * Read a field's value.
-   * @param path The field path to read.
-   * @param isDependency Whether this access should be tracked as a reactive dependency
-   *                     when used inside rule registration's dependency collection phase.
-   *                     Default true. Pass false to read without tracking.
-   */
   getValue: (path: FieldPath) => FieldValue;
   setVisible: (path: FieldPath, visible: boolean) => void;
   setValue: (
-    path: FieldPath,
-    value: FieldValue,
-    option?: { invokeOnChange?: boolean; invokeEffect?: boolean }
-  ) => void;
-  setValues: (
     path: FieldPath,
     values: Record<string, FieldValue>,
     option: {
       invokeOnChange?: boolean;
       invokeEffect?: boolean;
-    }
+    },
+    keepStrategy: ValueMergeStrategy,
   ) => void;
-  setValuesIfUserNotModified: (
-    path: FieldPath,
-    values: any,
-    dirty: boolean
-  ) => void;
-  resetFields: (path?: FieldPath) => void;
+  resetField: (path?: FieldPath) => void;
   setValidation: (
     path: FieldPath,
     validator: ZodType,
-    ruleSet?: string
+    ruleSet?: string,
   ) => void;
-  setArray: (
-    path: FieldPath,
-    value: Record<string, any>,
-    option?: { invokeEffect?: boolean }
-  ) => void;
+
   setAlertTip: (path: FieldPath, content: React.ReactNode) => void;
   setControlProp: (path: FieldPath, propName: string, propValue: any) => void;
   insertIntoArray: (
     path: FieldPath,
     value: Record<string, any>,
     key: string | undefined,
-    position: "before" | "after"
+    position: "before" | "after",
   ) => void;
   validateField: (
     path: FieldPath,
     enableEnhancer: boolean,
-    ruleSet?: string
+    ruleSet?: string,
   ) => Promise<void>;
-  // setIncludePolicy: (path: FieldPath, policy: IncludePolicyLeafField) => void;
 };
 
 export interface ReactiveRule {
@@ -91,10 +71,16 @@ export interface ReactiveRule {
 export type ReactiveEffect = (
   ctx: ReactiveEffectContext,
   cause: EffectInvokeReason,
-  info?: { changedPath?: FieldPath }
+  info?: { changedPath?: FieldPath },
 ) => void;
 
 export type FieldSource = "initial" | "user" | "source";
+
+export type DistributiveOmit<T, K extends PropertyKey> = T extends any
+  ? Omit<T, K>
+  : never;
+
+export type ArraySchema = DistributiveOmit<FieldSchema, "key" | "include">;
 
 /**
  * Describes the schema of a dynamic form field, supporting:
@@ -187,7 +173,7 @@ export type FieldSchema =
       initialVisible?: boolean;
       include?: boolean;
       removeWhenNoChildren?: boolean;
-      arraySchema: Omit<FieldSchema, "key">;
+      arraySchema: ArraySchema;
       LayoutComponent?: React.ElementType<{
         render: (state: ImmutableFormState) => React.ReactNode;
         state: ImmutableFormState;
@@ -234,7 +220,6 @@ export interface LeafFieldStaticProp {
     onChange: (value: FieldValue, path: FieldPath) => void;
     formCommands: FormCommands;
   }>;
-  defaultValue: FieldValue;
 }
 
 export interface NestedFieldStaticProp {
@@ -252,7 +237,11 @@ export interface NestedFieldDynamicProp {
   removeWhenNoChildren: boolean;
 }
 
-type MutableFieldNodeBaseType = {
+export type MutableNestedFieldNode = MutableFieldNode<"array" | "object">;
+
+export type AnyMutableFieldNode = MutableFieldNode<FieldType>;
+
+type MutableFieldNodeBaseType<type extends FieldType> = {
   key: FieldKey;
   /**
    * 一个包含dummy节点的路径
@@ -261,40 +250,67 @@ type MutableFieldNodeBaseType = {
   /**
    * 如果是数组型嵌套字段下的字段，需要有一个指向最靠近根字段的属性
    */
-  rootArrayField?: MutableFieldNode;
+  rootArrayField?: MutableFieldNode<"array">;
+  /**
+   * 指向父节点的引用
+   */
+  parent: MutableNestedFieldNode | undefined;
   effect?: Set<ReactiveEffect>;
 
   /** 为了生成不可变快照的辅助属性，与其他字段不同 */
   snapshot:
     | {
-        /** 节点是最新的 */
+        /** 节点是最新的，可以直接拿缓存用来渲染 */
         dirty: false;
         /** 存储节点的引用，没有发生变化的节点直接浅拷贝 */
-        lastValue: ImmutableFormState | null;
+        lastValue: ImmutableFormState;
       }
     | {
-        /** 节点发生了变化，需要重新生成不可变快照 */
+        /** 节点发生了变化，渲染前需要重新生成不可变快照 */
         dirty: true;
+      }
+    | {
+        /** 刚初始化的节点，不需要渲染 */
+        dirty: "uninitialized";
       };
-  cache: NodeCache;
+  cache: NodeCache<type>;
 };
 
-export type NodeCache = {
+export type ComparablePlainObject<T extends FieldType> = T extends "field"
+  ?
+      | {
+          include: false;
+        }
+      | { include: true; value: any }
+  : T extends "object"
+    ? { include: boolean }
+    :
+        | { include: true; order: FieldKey[] }
+        | {
+            include: false;
+          };
+
+export type NodeCache<T extends FieldType> = {
   /** 存储表单提交后导出的普通对象的缓存 */
-  plainObj:
+  plainObj: { lastValue: ComparablePlainObject<T> } & (
     | {
-        objectOnly: Record<string, any> | undefined;
+        validateData: Record<string, any> | undefined;
         submitData: Record<string, any> | undefined;
-        objectOnlyIncludesHidden: Record<string, any> | undefined;
-        type: "hasValue";
+        type: "ready";
       }
     | {
-        objectOnlyIncludesHidden: Record<string, any> | undefined;
-        type: "hidden";
-      }
-    | {
+        validateData: Record<string, any> | undefined;
+        submitData: Record<string, any> | undefined;
         type: "dirty";
-      };
+      }
+    | {
+        // 完全新的节点，没值
+        type: "dirty";
+      }
+    | {
+        type: "void";
+      }
+  );
   // dirty代表不知道有哪些规则集，必须遍历所有子节点收集规则集
   validator:
     | "dirty"
@@ -310,45 +326,41 @@ export type NodeCache = {
               validator: ZodType;
             };
       };
-  // 该值与初始值的diff结果，深比较不相等dirty===true，缓存失效是dirty
-  dirty:
-    | {
-        isDirty: boolean;
-      }
-    | "dirty";
+  // 该值与初始值的diff结果，深比较不相等dirty===true
+  // 为了效率不考虑当前节点以及所有祖先节点的include，
+  selfDirty: boolean;
 };
 
-export type MutableFieldNode = MutableFieldNodeBaseType &
-  (
-    | {
-        type: "field";
-        dynamicProp: LeafFieldDynamicProp;
-        staticProp: LeafFieldStaticProp;
-        source: FieldSource;
-        /** 字段运行时的响应式字段，如果字段是isArray: true的子节点，则无效 */
-        effect: Set<ReactiveEffect>;
-      }
-    | {
+export type MutableFieldNode<T extends FieldType> = T extends "field"
+  ? MutableFieldNodeBaseType<"field"> & {
+      type: "field";
+      dynamicProp: LeafFieldDynamicProp;
+      staticProp: LeafFieldStaticProp;
+      source: FieldSource;
+      /** 字段运行时的响应式字段，如果字段是isArray: true的子节点，则无效 */
+      effect: Set<ReactiveEffect>;
+    }
+  : T extends "object"
+    ? MutableFieldNodeBaseType<"object"> & {
         type: "object";
         dynamicProp: NestedFieldDynamicProp;
         staticProp: NestedFieldStaticProp;
-        children: MutableFieldNode[];
+        children: MutableFieldNode<FieldType>[];
       }
-    | {
+    : MutableFieldNodeBaseType<"array"> & {
         type: "array";
         dynamicProp: NestedFieldDynamicProp;
         staticProp: {
           /** 定义了数组单个元素的结构体 */
-          schema: Omit<FieldSchema, "key">;
+          schema: ArraySchema;
           LayoutComponent?: React.ElementType<{
             render: (state: ImmutableFormState) => React.ReactNode;
             state: ImmutableFormState;
             formCommands: FormCommands;
           }>;
         };
-        children: MutableFieldNode[];
-      }
-  );
+        children: MutableFieldNode<FieldType>[];
+      };
 
 export type ImmutableFormFieldProp = {
   label: string;
@@ -388,16 +400,11 @@ export type ImmutableFormState =
       }>;
     };
 
-export type ValueMergeStrategy =
-  | { mode: "merge" }
-  | {
-      mode: "replace";
-      clearSource: FieldSource;
-    };
+export type ValueMergeStrategy = "merge" | "replace";
 
 export type InitialValueObject =
   | {
-      type: "leaf";
+      type: "field";
       key: string;
       value: any;
       include: boolean;
@@ -411,6 +418,7 @@ export type InitialValueObject =
   | {
       type: "array";
       key: string;
+      schema: ArraySchema;
       children: InitialValueObject[];
       include: boolean;
     };

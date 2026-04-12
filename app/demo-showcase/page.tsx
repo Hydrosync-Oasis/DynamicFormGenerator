@@ -497,7 +497,7 @@ export default function DemoShowcasePage() {
         },
       ] satisfies FieldSchema[],
     }),
-    []
+    [],
   );
 
   const [model] = useState(() => new FormModel(schema));
@@ -526,97 +526,78 @@ export default function DemoShowcasePage() {
         fieldPaths: [["compliance"] as FieldPath, ["approvals"] as FieldPath],
       },
     ],
-    []
+    [],
   );
 
   const [currentStep, setCurrentStep] = useState(0);
 
   useEffect(() => {
-    const disposers: Array<() => void> = [];
+    model.registerRule((ctx) => {
+      const planType = ctx.track(["planning", "planType"]);
+      const validator =
+        planType === "enterprise"
+          ? z.coerce.number().min(10, { message: "企业方案至少 10 人" })
+          : z.coerce.number().min(2, { message: "团队至少 2 人" }).optional();
+      ctx.setValidation(["planning", "teamSize"], validator);
+    });
 
-    disposers.push(
-      model.registerRule((ctx) => {
-        const planType = ctx.track(["planning", "planType"]);
-        const validator =
-          planType === "enterprise"
-            ? z.coerce.number().min(10, { message: "企业方案至少 10 人" })
-            : z.coerce.number().min(2, { message: "团队至少 2 人" }).optional();
-        ctx.setValidation(["planning", "teamSize"], validator);
-      })
-    );
+    model.registerRule((ctx) => {
+      const mode = ctx.track(["planning", "needCustomIntegration"]);
+      const needDetail = mode === "custom";
+      ctx.setVisible(["planning", "integrationNotes"], needDetail);
+      ctx.setValidation(
+        ["planning", "integrationNotes"],
+        needDetail
+          ? z.string().min(10, { message: "请描述定制集成需求" })
+          : z.string().optional(),
+      );
+    });
 
-    disposers.push(
-      model.registerRule((ctx) => {
-        const mode = ctx.track(["planning", "needCustomIntegration"]);
-        const needDetail = mode === "custom";
-        ctx.setVisible(["planning", "integrationNotes"], needDetail);
-        ctx.setValidation(
-          ["planning", "integrationNotes"],
-          needDetail
-            ? z.string().min(10, { message: "请描述定制集成需求" })
-            : z.string().optional()
-        );
-      })
-    );
+    model.registerRule((ctx) => {
+      const enabled = ctx.track(["deployment", "enableAutoScaling"]);
+      ctx.setVisible(["deployment", "autoScalingMax"], !!enabled);
+    });
 
-    disposers.push(
-      model.registerRule((ctx) => {
-        const enabled = ctx.track(["deployment", "enableAutoScaling"]);
-        const min = Number(ctx.track(["deployment", "minCapacity"])) || 1;
-        ctx.setVisible(["deployment", "autoScalingMax"], !!enabled);
-        ctx.setValidation(
-          ["deployment", "autoScalingMax"],
-          enabled
-            ? z.coerce.number().min(min + 1, { message: "上限需大于最小实例" })
-            : z.coerce.number().optional()
-        );
-      })
-    );
+    model.registerRule((ctx) => {
+      const country = ctx.track(["compliance", "billingCountry"]);
+      const requireVat = ["de", "fr", "uk"].includes(country);
+      ctx.setVisible(["compliance", "vatNumber"], requireVat);
+      ctx.setValidation(
+        ["compliance", "vatNumber"],
+        requireVat
+          ? z.string().min(5, { message: "请输入合法 VAT 编号" })
+          : z.string().optional(),
+      );
+    });
 
-    disposers.push(
-      model.registerRule((ctx) => {
-        const country = ctx.track(["compliance", "billingCountry"]);
-        const requireVat = ["de", "fr", "uk"].includes(country);
-        ctx.setVisible(["compliance", "vatNumber"], requireVat);
-        ctx.setValidation(
-          ["compliance", "vatNumber"],
-          requireVat
-            ? z.string().min(5, { message: "请输入合法 VAT 编号" })
-            : z.string().optional()
-        );
-      })
-    );
+    model.registerRule((ctx) => {
+      const needsLegal = ctx.track(["approvals", "needsLegalReview"]);
+      const visible = needsLegal === "yes";
+      ctx.setVisible(["approvals", "legalContact"], visible);
+      ctx.setValidation(
+        ["approvals", "legalContact"],
+        visible
+          ? z.string().email({ message: "请输入法务联系人邮箱" })
+          : z.string().optional(),
+      );
+    });
 
-    disposers.push(
-      model.registerRule((ctx) => {
-        const needsLegal = ctx.track(["approvals", "needsLegalReview"]);
-        const visible = needsLegal === "yes";
-        ctx.setVisible(["approvals", "legalContact"], visible);
-        ctx.setValidation(
-          ["approvals", "legalContact"],
-          visible
-            ? z.string().email({ message: "请输入法务联系人邮箱" })
-            : z.string().optional()
-        );
-      })
-    );
-
-    disposers.push(
-      model.registerRule((ctx) => {
-        const risk = ctx.track(["deployment", "riskLevel"]);
-        const showNote = risk === "high";
-        ctx.setVisible(["approvals", "riskMitigationNote"], showNote);
-        ctx.setValidation(
-          ["approvals", "riskMitigationNote"],
-          showNote
-            ? z.string().min(10, { message: "请填写风险缓解计划" })
-            : z.string().optional()
-        );
-      })
-    );
+    model.registerRule((ctx) => {
+      const risk = ctx.track(["deployment", "riskLevel"]);
+      const showNote = risk === "high";
+      ctx.setVisible(["approvals", "riskMitigationNote"], showNote);
+      ctx.setValidation(
+        ["approvals", "riskMitigationNote"],
+        showNote
+          ? z.string().min(10, { message: "请填写风险缓解计划" })
+          : z.string().optional(),
+      );
+    });
 
     model.setRefiner([], (base) =>
       base.superRefine((values, refinementCtx) => {
+        console.log(123);
+
         const data = values as Record<string, any>;
         const start = data?.deployment?.startDate;
         const end = data?.deployment?.endDate;
@@ -646,14 +627,24 @@ export default function DemoShowcasePage() {
             message: "企业方案预算建议≥20万",
           });
         }
-      })
+
+        const enabled = data?.deployment?.enableAutoScaling;
+        const min = Number(data?.deployment?.minCapacity) || 1;
+        const max = data?.deployment?.autoScalingMax;
+        if (enabled && max !== undefined && max !== null && max !== "") {
+          const maxNum = Number(max);
+          if (!Number.isNaN(maxNum) && maxNum <= min) {
+            refinementCtx.addIssue({
+              code: "custom",
+              path: ["deployment", "autoScalingMax"],
+              message: "上限需大于最小实例",
+            });
+          }
+        }
+      }),
     );
 
     model.initial();
-
-    return () => {
-      disposers.forEach((dispose) => dispose());
-    };
   }, [model]);
 
   const currentStepConfig = steps[currentStep];
@@ -664,7 +655,6 @@ export default function DemoShowcasePage() {
 
   const handleNext = async () => {
     try {
-      debugger;
       await form.validateFields(currentStepConfig.fieldPaths);
       setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
       message.success("当前分页校验通过");
@@ -739,6 +729,7 @@ export default function DemoShowcasePage() {
             </Button>
           )}
           <Button onClick={handlePreviewAll}>打印当前数据</Button>
+          <Button onClick={() => console.log(model)}>打印Model</Button>
         </Space>
       </Card>
     </div>

@@ -1,9 +1,9 @@
 import { z, ZodType } from "zod";
-import { MutableFieldNode } from "./type";
+import { AnyMutableFieldNode, MutableFieldNode } from "./type";
 import { getNodesOnPath } from "./structures";
 
 class ValidatorCacheManager {
-  mutableDataSource: MutableFieldNode;
+  mutableDataSource: AnyMutableFieldNode;
 
   finalValidator:
     | "hidden"
@@ -16,7 +16,7 @@ class ValidatorCacheManager {
       >
     | undefined = undefined;
 
-  constructor(mutableDataSource: MutableFieldNode) {
+  constructor(mutableDataSource: AnyMutableFieldNode) {
     this.mutableDataSource = mutableDataSource;
     this.rebuild();
   }
@@ -33,31 +33,30 @@ class ValidatorCacheManager {
   /**
    * 何时调用：字段 visible 发生变化，或者 validation 规则发生变化时
    */
-  updateNode(node: MutableFieldNode, ruleSet?: string) {
+  updateNode(node: AnyMutableFieldNode) {
     const nodes = getNodesOnPath(
       this.mutableDataSource,
       node.path.slice(1),
-      true
+      true,
     );
 
-    nodes?.forEach((n) => {
+    if (nodes === undefined) {
+      throw new Error("path error: " + node.path);
+    }
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i];
       const validatorCache = n.cache.validator;
 
       if (validatorCache === "dirty") {
-        return;
+        continue;
       }
       if (validatorCache === "hidden") {
         n.cache.validator = "dirty";
-        return;
-      }
-
-      if (ruleSet) {
-        validatorCache[ruleSet] = { type: "dirty" };
-        return;
+        continue;
       }
 
       n.cache.validator = "dirty";
-    });
+    }
   }
 
   /**
@@ -65,7 +64,7 @@ class ValidatorCacheManager {
    */
   rebuild() {
     const dfs = (
-      node: MutableFieldNode
+      node: AnyMutableFieldNode,
     ):
       | {
           [ruleSet: string]: { type: "hasValue"; validator: ZodType };
@@ -82,7 +81,7 @@ class ValidatorCacheManager {
           | "hidden" = Object.fromEntries(
           Object.entries(node.dynamicProp.validation).map(([rSet, v]) => {
             return [rSet, { type: "hasValue", validator: v }];
-          })
+          }),
         );
         if (!include) {
           res = "hidden";
@@ -136,7 +135,7 @@ class ValidatorCacheManager {
         validator = Object.fromEntries(
           Object.entries(validatorMap).map(([ruleSet, v]) => {
             return [ruleSet, { type: "hasValue", validator: z.object(v) }];
-          })
+          }),
         );
 
         // 应用自定义的 refine（如果存在）
@@ -147,7 +146,7 @@ class ValidatorCacheManager {
           validator[ruleSet] = {
             type: "hasValue",
             validator: refiners[ruleSet](
-              ruleSet in validator ? validator[ruleSet].validator : z.any()
+              ruleSet in validator ? validator[ruleSet].validator : z.any(),
             ),
           };
         }

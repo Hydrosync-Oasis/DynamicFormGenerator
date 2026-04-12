@@ -44,13 +44,13 @@ const useDynamicForm = (model: FormModel) => {
         return model.get(path, "value");
       },
       setFieldValue: (path: FieldPath, value: FieldValue) => {
-        model.setValue(path, value, { invokeOnChange: true }, true);
+        model.setValue(path, value);
       },
       setFieldsValue: (values: any) => {
-        model.setValues([], values, undefined, true);
+        model.setValue([], values);
       },
       resetFields: (path?: FieldPath) => {
-        model.resetFields(path);
+        model.resetField(path);
       },
       /**
        * 校验指定字段，使用多步骤动态表单优先使用这个函数
@@ -276,7 +276,7 @@ export const DefaultFieldDisplay = React.memo(
         </div>
       </React.Fragment>
     );
-  }
+  },
 );
 
 DefaultFieldDisplay.displayName = "DefaultFieldDisplay";
@@ -287,7 +287,7 @@ DefaultFieldDisplay.displayName = "DefaultFieldDisplay";
 export const withWiderLabel = (
   labelSpan: number = 6,
   fontSize?: number,
-  lineHeight?: number
+  lineHeight?: number,
 ) => {
   const WiderLabelFieldDisplay = React.memo(
     ({
@@ -315,7 +315,7 @@ export const withWiderLabel = (
           formCommands={commands}
         />
       );
-    }
+    },
   );
 
   WiderLabelFieldDisplay.displayName = `WiderLabelFieldDisplay(${labelSpan})`;
@@ -347,22 +347,14 @@ const Generator = ({
   const state = useSyncExternalStore(
     model.subscribe.bind(model),
     model.getSnapshot.bind(model),
-    model.getSnapshot.bind(model)
+    model.getSnapshot.bind(model),
   );
   // 处理字段值变化的回调
-  const handleUpdateValue = (
-    model: FormModel,
-    value: FieldValue,
-    path: FieldPath
-  ) => {
-    model.setValue(path, value, { invokeOnChange: true }, true);
-  };
-
   const changeCallback = useCallback(
     (value: FieldValue, path: FieldPath) => {
-      handleUpdateValue(model, value, path);
+      model.setValue(path, value, undefined, undefined, true);
     },
-    [model]
+    [model],
   );
 
   // 递归渲染字段的函数
@@ -413,7 +405,7 @@ const Generator = ({
         />
       );
     },
-    [changeCallback, model.formCommands]
+    [changeCallback, model.formCommands],
   );
 
   const theme = useMemo(() => {

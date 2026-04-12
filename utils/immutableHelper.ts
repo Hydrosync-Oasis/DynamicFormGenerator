@@ -1,8 +1,12 @@
 import { MutableFieldNode, FieldPath, getNodesOnPath } from "./structures";
-import { ImmutableFormFieldProp, ImmutableFormState } from "./type";
+import {
+  AnyMutableFieldNode,
+  ImmutableFormFieldProp,
+  ImmutableFormState,
+} from "./type";
 
 export function mutableNodeToImmutableNode(
-  sourceNode: MutableFieldNode
+  sourceNode: AnyMutableFieldNode,
 ): ImmutableFormState {
   const snapshotInfo = sourceNode.snapshot;
 
@@ -15,7 +19,7 @@ export function mutableNodeToImmutableNode(
     // 如果发生了变化，或者是第一次来，都需要生成并赋值
     // 准备好返回的叶子结点
     const errorMsgEntries = Object.entries(
-      sourceNode.dynamicProp.errorMessage
+      sourceNode.dynamicProp.errorMessage,
     ).filter(([x, msg]) => msg && msg.length > 0) as [string, string[]][];
     let errorMsg: ImmutableFormFieldProp["errorMessage"] = undefined;
     if (errorMsgEntries.length > 0) {
@@ -47,7 +51,7 @@ export function mutableNodeToImmutableNode(
   }
 
   // 如果也是没有发生改变
-  if (snapshotInfo.dirty === false && snapshotInfo.lastValue) {
+  if (snapshotInfo.dirty === false) {
     return snapshotInfo.lastValue;
   }
 
@@ -65,7 +69,7 @@ export function mutableNodeToImmutableNode(
   // 如果是第一次遍历到这个嵌套节点，或确实需要发生更新
   for (let i in sourceNode.children) {
     nestedField.children.push(
-      mutableNodeToImmutableNode(sourceNode.children[i])
+      mutableNodeToImmutableNode(sourceNode.children[i]),
     );
   }
   sourceNode.snapshot = {
@@ -76,15 +80,36 @@ export function mutableNodeToImmutableNode(
   return nestedField;
 }
 
+export function markMutableNodeDirty(startNode: AnyMutableFieldNode) {
+  let current: AnyMutableFieldNode | undefined = startNode;
+  while (current) {
+    if (current.snapshot.dirty === true) {
+      break;
+    }
+    current.snapshot = { dirty: true };
+    const parent: AnyMutableFieldNode | undefined = current.parent;
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+}
+
+/**
+ * 标记一个字段节点及其所有祖先节点为脏
+ * @param mutableModel
+ * @param path 不包含dummy节点的路径
+ * @param setter
+ */
 export function setMutableNode(
-  mutableModel: MutableFieldNode,
+  mutableModel: AnyMutableFieldNode,
   path: FieldPath,
   setter: (
-    node: MutableFieldNode,
-    nodesOnPath: MutableFieldNode[],
+    node: AnyMutableFieldNode,
+    nodesOnPath: AnyMutableFieldNode[],
     /**用于标记此处发生改变的函数，会对这里生成全新的不可变对象 */
-    mutate: (node: MutableFieldNode) => void
-  ) => void | boolean
+    mutate: (node: AnyMutableFieldNode) => void,
+  ) => void | boolean,
 ) {
   const nodes = getNodesOnPath(mutableModel, path, true);
 
@@ -93,12 +118,10 @@ export function setMutableNode(
   }
 
   const shouldUpdate = setter(nodes[nodes.length - 1], nodes, (node) => {
-    node.snapshot.dirty = true;
+    markMutableNodeDirty(node);
   });
 
   if (shouldUpdate !== false) {
-    nodes?.forEach((n) => {
-      n.snapshot.dirty = true;
-    });
+    markMutableNodeDirty(nodes[nodes.length - 1]);
   }
 }

@@ -1,17 +1,23 @@
-import { MutableFieldNode, NodeCache } from "./type";
-import { getNodesOnPath } from "./structures";
+import {
+  AnyMutableFieldNode,
+  ComparablePlainObject,
+  FieldKey,
+  FieldType,
+  MutableFieldNode,
+  NodeCache,
+} from "./type";
 
 class PlainObjectCacheManager {
-  mutableDataSource: MutableFieldNode;
+  mutableDataSource: AnyMutableFieldNode;
 
   finalData: {
-    validatData: Record<string, any> | undefined;
+    validateData: Record<string, any> | undefined;
     submitData: Record<string, any> | undefined;
-  } = { validatData: undefined, submitData: undefined };
+  } = { validateData: undefined, submitData: undefined };
 
-  constructor(mutableDataSource: MutableFieldNode) {
+  constructor(mutableDataSource: AnyMutableFieldNode) {
     this.mutableDataSource = mutableDataSource;
-    this.rebuild();
+    this.rebuild(mutableDataSource);
   }
 
   /**
@@ -20,109 +26,247 @@ class PlainObjectCacheManager {
    * @returns
    */
   getFinalPlainObject(isSubmit: boolean = true) {
-    this.rebuild();
-    return isSubmit ? this.finalData.submitData : this.finalData.validatData;
+    this.rebuild(this.mutableDataSource);
+    return isSubmit ? this.finalData.submitData : this.finalData.validateData;
   }
 
   /**
    * 何时调用：字段Value发生变化，visible发生变化时
    */
-  updateNode(node: MutableFieldNode) {
-    const nodes = getNodesOnPath(
-      this.mutableDataSource,
-      node.path.slice(1),
-      true
-    );
-
-    nodes?.forEach((n) => {
-      n.cache.plainObj.type = "dirty";
-    });
+  updateNode(node: AnyMutableFieldNode) {
+    let cur: AnyMutableFieldNode | undefined = node;
+    while (cur && cur.cache.plainObj.type !== "dirty") {
+      cur.cache.plainObj = {
+        ...cur.cache.plainObj,
+        type: "dirty",
+      };
+      cur = cur.parent;
+    }
   }
 
   /**
    * 在调用此函数前确保已经使用updateNode进行过更新
    */
-  rebuild() {
-    const dfs = (
-      node: MutableFieldNode
-    ): NodeCache["plainObj"] & ({ type: "hidden" } | { type: "hasValue" }) => {
-      const cache = node.cache;
+  rebuild<T extends FieldType>(node: MutableFieldNode<T>) {
+    function dfs<T extends FieldType>(
+      node: MutableFieldNode<T>,
+    ): {
+      result: NodeCache<FieldType>["plainObj"] & { type: "ready" | "void" };
+      hasChange: boolean;
+    } {
       const include = node.dynamicProp.include;
+
       if (node.type === "field") {
-        if (include) {
-          cache.plainObj = {
-            submitData: node.dynamicProp.value,
-            objectOnly: node.dynamicProp.value,
-            objectOnlyIncludesHidden: node.dynamicProp.value,
-            type: "hasValue",
+        const plainObj = node.cache.plainObj;
+        if (plainObj.type !== "dirty") {
+          return { hasChange: false, result: plainObj };
+        }
+
+        const curVal: ComparablePlainObject<"field"> = {
+          include,
+          value: node.dynamicProp.value,
+        };
+        const lastValue = plainObj.lastValue;
+
+        let changed =
+          !curVal ||
+          curVal.include !== lastValue.include ||
+          (curVal.include &&
+            lastValue.include &&
+            !Object.is(curVal.value, lastValue.value));
+
+        if (!changed) {
+          if (!curVal.include) {
+            node.cache.plainObj = {
+              ...plainObj,
+              type: "void",
+            };
+          } else {
+            node.cache.plainObj = {
+              ...plainObj,
+              type: "ready",
+              submitData:
+                "submitData" in node.cache.plainObj
+                  ? node.cache.plainObj.submitData
+                  : curVal.value,
+              validateData:
+                "validateData" in node.cache.plainObj
+                  ? node.cache.plainObj.validateData
+                  : curVal.value,
+            };
+          }
+
+          return {
+            hasChange: false,
+            result: node.cache.plainObj,
+          };
+        }
+
+        if (!curVal.include) {
+          node.cache.plainObj = {
+            ...node.cache.plainObj,
+            type: "void",
           };
         } else {
-          cache.plainObj = {
-            type: "hidden",
-            objectOnlyIncludesHidden: node.dynamicProp.value,
+          // 交替更新
+          node.cache.plainObj.lastValue = curVal;
+          // 更新缓存
+
+          node.cache.plainObj = {
+            ...node.cache.plainObj,
+            type: "ready",
+            validateData: curVal.include && curVal.value,
+            submitData: curVal.include && curVal.value,
           };
         }
 
-        return cache.plainObj;
-      } else {
-        if (cache.plainObj.type !== "dirty") {
-          return cache.plainObj;
+        return {
+          hasChange: changed,
+          result: node.cache.plainObj,
+        };
+      } else if (node.type === "object") {
+        if (node.cache.plainObj.type !== "dirty") {
+          return {
+            hasChange: false,
+            result: node.cache.plainObj,
+          };
         }
-        const objectOnly: Record<string, any> = {};
-        const objOnlyIncludesHdn: Record<string, any> = {};
-        const submitObj: Record<string, any> = {};
-        const include = node.dynamicProp.include;
+        const curVal: ComparablePlainObject<"object"> = {
+          include,
+        };
+        const lastValue = node.cache.plainObj.lastValue;
 
+        const validateObj: Record<string, any> = {};
+        const submitObj: Record<string, any> = {};
+
+        let changed = lastValue.include !== curVal.include;
         for (let i of node.children) {
           const res = dfs(i);
-          // 一定不是undefined了
-          if (res && res.type === "hasValue") {
-            objectOnly[i.key] = res.objectOnly;
-            submitObj[i.key] = res.submitData;
+          changed = changed || res.hasChange;
+
+          const result = res.result;
+          if (result.type === "void") {
+            continue;
           }
-          objOnlyIncludesHdn[i.key] = res.objectOnlyIncludesHidden;
+
+          validateObj[i.key] = result.validateData;
+          submitObj[i.key] = result.submitData;
         }
 
-        // 如果可能会被包含在提交数据中
-        if (include) {
-          // 当当前节点是数组类型时，submitData 需要是一个“仅包含值的数组”（丢弃 key）
-          // 为了保证顺序，按 children 顺序收集已有的值
-          const submitData =
-            node.type === "array"
-              ? node.children
-                  .filter((child) =>
-                    Object.prototype.hasOwnProperty.call(submitObj, child.key)
-                  )
-                  .map((child) => submitObj[child.key])
-              : submitObj;
+        if (!changed) {
+          if (include) {
+            node.cache.plainObj = {
+              validateData: validateObj,
+              submitData: submitObj,
+              ...node.cache.plainObj,
+              type: "ready",
+            };
+          } else {
+            node.cache.plainObj = {
+              ...node.cache.plainObj,
+              type: "void",
+            };
+          }
 
-          cache.plainObj = {
-            submitData,
-            objectOnly: objectOnly,
-            objectOnlyIncludesHidden: objOnlyIncludesHdn,
-            type: "hasValue",
+          return { hasChange: false, result: node.cache.plainObj };
+        }
+
+        if (include) {
+          node.cache.plainObj = {
+            lastValue: curVal,
+            submitData: submitObj,
+            validateData: validateObj,
+            type: "ready",
           };
         } else {
-          cache.plainObj = {
-            type: "hidden",
-            objectOnlyIncludesHidden: objOnlyIncludesHdn,
+          node.cache.plainObj = {
+            lastValue: curVal,
+            type: "void",
           };
         }
 
-        return cache.plainObj;
-      }
-    };
+        return { result: node.cache.plainObj, hasChange: changed };
+      } else {
+        if (node.cache.plainObj.type !== "dirty") {
+          return {
+            hasChange: false,
+            result: node.cache.plainObj,
+          };
+        }
 
-    const res = dfs(this.mutableDataSource);
-    this.mutableDataSource.cache.plainObj = res;
-    if (res.type === "hasValue") {
-      this.finalData = {
-        validatData: res.objectOnly,
-        submitData: res.submitData,
-      };
-    } else {
-      this.finalData = { validatData: undefined, submitData: undefined };
+        const curVal: ComparablePlainObject<"array"> = include
+          ? {
+              include,
+              order: node.children.map((x) => x.key),
+            }
+          : {
+              include,
+            };
+        const lastValue = node.cache.plainObj.lastValue;
+        let changed =
+          curVal.include !== lastValue.include ||
+          (curVal.include &&
+            lastValue.include &&
+            lastValue.order.every((key, i, arr) => {
+              return (
+                key !== curVal.order[i] || arr.length !== curVal.order.length
+              );
+            }));
+
+        const validateObj: Record<FieldKey, any> = {};
+        const submitObj: Record<FieldKey, any> = {};
+
+        // 子节点脏情况
+        for (let i of node.children) {
+          const res = dfs(i);
+          changed = changed || res.hasChange;
+
+          const result = res.result;
+          if (result.type === "void") {
+            throw new Error("数组第一层节点不能是空");
+          }
+
+          validateObj[i.key] = result.validateData;
+          submitObj[i.key] = result.submitData;
+        }
+
+        if (!changed) {
+          node.cache.plainObj = {
+            submitData: submitObj,
+            validateData: validateObj,
+            ...node.cache.plainObj,
+            type: "ready",
+          };
+          return {
+            hasChange: changed,
+            result: node.cache.plainObj,
+          };
+        }
+
+        const submitData = node.children
+          .filter((child) => Object.hasOwn(submitObj, child.key))
+          .map((child) => submitObj[child.key]);
+
+        node.cache.plainObj = {
+          lastValue: curVal,
+          submitData,
+          validateData: validateObj,
+          type: "ready",
+        };
+
+        return { result: node.cache.plainObj, hasChange: changed };
+      }
     }
+
+    const res = dfs(node);
+    this.mutableDataSource.cache.plainObj = res.result;
+
+    this.finalData = {
+      validateData:
+        res.result.type === "void" ? undefined : res.result.validateData,
+      submitData:
+        res.result.type === "void" ? undefined : res.result.submitData,
+    };
   }
 }
 

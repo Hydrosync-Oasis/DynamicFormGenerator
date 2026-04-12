@@ -50,7 +50,7 @@ export default function ArrayTestPage() {
           {state.children.map((child: any) => render(child))}
         </div>
       );
-    }
+    },
   );
 
   ServersFlexLayout.displayName = "ServersFlexLayout";
@@ -65,8 +65,6 @@ export default function ArrayTestPage() {
       state: any;
     }) => {
       // 从state中获取当前路径的IP地址（作为标题）
-      console.log(state);
-
       const path = state.path as FieldPath;
       const ipAddress = path[path.length - 1]; // 数组项的key就是IP地址
 
@@ -89,7 +87,7 @@ export default function ArrayTestPage() {
           {state.children.map((child: any) => render(child))}
         </Card>
       );
-    }
+    },
   );
 
   ServerCardLayout.displayName = "ServerCardLayout";
@@ -118,7 +116,7 @@ export default function ArrayTestPage() {
                   return ipRegex.test(ip);
                 });
               },
-              { message: "请输入有效的IP地址格式" }
+              { message: "请输入有效的IP地址格式" },
             ),
           helpTip: "示例：192.168.1.1, 10.0.0.1",
         },
@@ -159,7 +157,7 @@ export default function ArrayTestPage() {
                       const port = parseInt(val);
                       return port > 0 && port <= 65535;
                     },
-                    { message: "端口号必须在1-65535之间" }
+                    { message: "端口号必须在1-65535之间" },
                   ),
                 FieldDisplayComponent: WiderLabelField,
               },
@@ -215,7 +213,7 @@ export default function ArrayTestPage() {
                   return ipRegex.test(ip);
                 });
               },
-              { message: "请输入有效的IP地址格式" }
+              { message: "请输入有效的IP地址格式" },
             ),
           helpTip: "示例：192.168.1.1, 10.0.0.1",
         },
@@ -256,7 +254,7 @@ export default function ArrayTestPage() {
                       const port = parseInt(val);
                       return port > 0 && port <= 65535;
                     },
-                    { message: "端口号必须在1-65535之间" }
+                    { message: "端口号必须在1-65535之间" },
                   ),
                 FieldDisplayComponent: WiderLabelField,
               },
@@ -268,6 +266,7 @@ export default function ArrayTestPage() {
           key: "serversMemory",
           label: "服务器记忆状态（虚拟字段）",
           initialVisible: false,
+          include: false,
           isArray: true,
           LayoutComponent: ServersFlexLayout,
           arraySchema: {
@@ -328,7 +327,7 @@ export default function ArrayTestPage() {
         },
       ] satisfies FieldSchema[],
     }),
-    []
+    [],
   );
 
   // 初始化模型 & Hook
@@ -366,12 +365,17 @@ export default function ArrayTestPage() {
           }
         });
 
-        ctx.setArray(["servers"], newServers, { invokeEffect: true });
+        ctx.setValue(
+          ["servers"],
+          newServers,
+          { invokeEffect: true },
+          "replace",
+        );
       } else if (!ipAddresses || ipAddresses.trim() === "") {
         // 如果IP地址为空，清空服务器数组
         const currentServers = ctx.getValue(["servers"]) || {};
         if (Object.keys(currentServers).length > 0) {
-          ctx.setArray(["servers"], {}, { invokeEffect: false });
+          ctx.setValue(["servers"], {}, { invokeEffect: false }, "replace");
         }
       }
     });
@@ -379,9 +383,11 @@ export default function ArrayTestPage() {
     // 注册联动规则2：根据协议类型显示/隐藏SSL证书路径
     model.registerRule((ctx, cause) => {
       const serversValue = ctx.track(["servers"]);
+      console.log(serversValue);
+
       if (serversValue && typeof serversValue === "object") {
         Object.keys(serversValue).forEach((key) => {
-          const protocol = ctx.track(["servers", key, "protocol"]);
+          const protocol = ctx.getValue(["servers", key, "protocol"]);
           const shouldShowSSL = protocol === "https";
 
           ctx.setVisible(["servers", key, "sslCertPath"], shouldShowSSL);
@@ -390,12 +396,12 @@ export default function ArrayTestPage() {
           if (shouldShowSSL) {
             ctx.setValidation(
               ["servers", key, "sslCertPath"],
-              z.string().min(1, { message: "请输入SSL证书路径" })
+              z.string().min(1, { message: "请输入SSL证书路径" }),
             );
           } else {
             ctx.setValidation(
               ["servers", key, "sslCertPath"],
-              z.string().optional()
+              z.string().optional(),
             );
           }
         });
@@ -430,12 +436,17 @@ export default function ArrayTestPage() {
           }
         });
 
-        ctx.setArray(["servers2"], newServers, { invokeEffect: true });
+        ctx.setValue(
+          ["servers2"],
+          newServers,
+          { invokeEffect: true },
+          "replace",
+        );
       } else if (!ipAddresses || ipAddresses.trim() === "") {
         // 如果IP地址为空，清空服务器数组
         const currentServers = ctx.getValue(["servers2"]) || {};
         if (Object.keys(currentServers).length > 0) {
-          ctx.setArray(["servers2"], {}, { invokeEffect: false });
+          ctx.setValue(["servers2"], {}, { invokeEffect: false }, "replace");
         }
       }
     });
@@ -445,7 +456,7 @@ export default function ArrayTestPage() {
       const servers = ctx.track(["servers"]) || {};
 
       // 更新虚拟字段
-      model.setValues(["serversMemory"], servers, { invokeEffect: true });
+      model.setValue(["serversMemory"], servers, { invokeEffect: true });
     });
 
     // 注册联动规则4：当 servers2 变化时，更新虚拟字段 serversMemory
@@ -453,7 +464,7 @@ export default function ArrayTestPage() {
       const servers2 = ctx.track(["servers2"]) || {};
 
       // 更新虚拟字段（完整数据，会自动合并）
-      model.setValues(["serversMemory"], servers2, { invokeEffect: true });
+      model.setValue(["serversMemory"], servers2, { invokeEffect: true });
     });
 
     // 注册联动规则5：当虚拟字段 serversMemory 变化时，同步到 servers 和 servers2
@@ -482,13 +493,15 @@ export default function ArrayTestPage() {
       });
 
       // 同步到 servers（setValues会自动处理字段过滤）
-      model.setValues(["servers"], newServers, { invokeEffect: false });
+      model.setValue(["servers"], newServers, { invokeEffect: false });
 
       // 同步到 servers2（setValues会自动忽略protocol和sslCertPath字段）
-      model.setValues(["servers2"], newServers2, { invokeEffect: false });
+      model.setValue(["servers2"], newServers2, { invokeEffect: false });
     });
 
     model.initial();
+
+    console.log(model);
   }, [model]);
 
   // 展示字段
