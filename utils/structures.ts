@@ -483,8 +483,6 @@ class FormModel {
     }
 
     this.updateNodeIncludeState(node, include);
-    setMutableNode(this.mutableDataSource, path, () => {});
-    this.notify();
   }
 
   setValue(

@@ -10,7 +10,9 @@ import { FieldPath } from "./type";
 
 export class SubscribeManager {
   subscribeTree: SubscribeNode;
-  shouldNotifyNodes: Set<SubscribeNode>;
+  private queue1: Set<SubscribeNode>;
+  private queue2: Set<SubscribeNode>;
+  private isQueue1: boolean;
 
   constructor() {
     this.subscribeTree = {
@@ -19,7 +21,21 @@ export class SubscribeManager {
       subscriber: {},
       parent: undefined,
     };
-    this.shouldNotifyNodes = new Set();
+    this.queue1 = new Set();
+    this.queue2 = new Set();
+    this.isQueue1 = true;
+  }
+
+  private get currentQueue() {
+    return this.isQueue1 ? this.queue1 : this.queue2;
+  }
+
+  private get wipQueue() {
+    return !this.isQueue1 ? this.queue1 : this.queue2;
+  }
+
+  private swapQueue() {
+    this.isQueue1 = !this.isQueue1;
   }
 
   hasSubscribers(subscribeNode: SubscribeNode) {
@@ -109,7 +125,7 @@ export class SubscribeManager {
   }
 
   markAsShouldNotify(subscribeNode: SubscribeNode) {
-    this.shouldNotifyNodes.add(subscribeNode);
+    this.currentQueue.add(subscribeNode);
   }
 
   subscribe<T extends SubscribeTopic>(
@@ -154,13 +170,14 @@ export class SubscribeManager {
   }
 
   notify() {
-    this.shouldNotifyNodes.forEach((subNode) => {
+    this.swapQueue();
+    this.currentQueue.forEach((subNode) => {
       Object.entries(subNode.subscriber).forEach(([topic]) => {
         this.notifyOneNode(subNode, topic as SubscribeTopic);
       });
     });
 
-    this.shouldNotifyNodes.clear();
+    this.currentQueue.clear();
   }
 
   private notifyOneNode(subscribeNode: SubscribeNode, topic: SubscribeTopic) {
@@ -224,7 +241,7 @@ export class SubscribeManager {
         break;
       }
 
-      this.shouldNotifyNodes.delete(node);
+      this.currentQueue.delete(node);
 
       const parent = visitedNodes[i - 1];
       parent.children.delete(node.key);
