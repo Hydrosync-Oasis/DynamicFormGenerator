@@ -178,7 +178,7 @@ export default function ValidationDemo() {
                 val === undefined || (!isNaN(val) && val >= 18 && val <= 100),
               {
                 message: "年龄必须在18-100之间",
-              }
+              },
             ),
         },
         helpTip: "onBlur 验证：失焦时验证年龄范围",
@@ -211,7 +211,7 @@ export default function ValidationDemo() {
     const formModel = new FormModel({ fields: schema });
 
     // 注册响应式规则：根据用户类型控制字段可见性
-    formModel.registerRule((ctx, cause) => {
+    formModel.effect((ctx, cause) => {
       const userType = ctx.track(["userType"]);
 
       if (userType === "personal") {
@@ -234,7 +234,7 @@ export default function ValidationDemo() {
     });
 
     // 注册响应式规则：验证密码确认
-    formModel.registerRule((ctx, cause) => {
+    formModel.effect((ctx, cause) => {
       const password = ctx.track(["password"]);
       const confirmPassword = ctx.track(["confirmPassword"]);
 
@@ -242,13 +242,13 @@ export default function ValidationDemo() {
         ctx.setValidation(
           ["confirmPassword"],
           z.string().refine(() => false, { message: "两次密码输入不一致" }),
-          "onSubmit"
+          "onSubmit",
         );
       } else {
         ctx.setValidation(
           ["confirmPassword"],
           z.string().min(1, "请确认密码"),
-          "onSubmit"
+          "onSubmit",
         );
       }
     });
@@ -358,7 +358,7 @@ export default function ValidationDemo() {
                 {JSON.stringify(
                   submitResult.success ? submitResult.data : submitResult.error,
                   null,
-                  2
+                  2,
                 )}
               </pre>
             </Card>

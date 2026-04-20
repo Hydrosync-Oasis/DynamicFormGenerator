@@ -93,8 +93,10 @@ export default function DynamicExamplePage() {
       }),
     );
 
-    model.registerRule((ctx) => {
-      const userType = ctx.track(["userType"]);
+    const unsub = model.effect((value, ctx, reason) => {
+      console.log(111);
+
+      const userType = value.userType();
       // 条件显示：企业显示公司名
       ctx.setVisible(["companyName"], userType === "company");
       // 动态 required：切换字段校验（用于 Required 星标与即时校验）
@@ -111,6 +113,7 @@ export default function DynamicExamplePage() {
     // 初始化一次，让规则先跑
     model.initial();
     console.log(model);
+    return unsub;
   }, []);
 
   // 4) 展示字段顺序

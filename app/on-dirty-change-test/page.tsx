@@ -75,6 +75,7 @@ export default function OnDirtyChangeTestPage() {
 
     const unsubName = model.onDirtyChange(NAME_PATH, onNameDirty);
     const unsubProfile = model.onDirtyChange(PROFILE_PATH, onProfileDirty);
+    console.log(model);
 
     return () => {
       unsubName();

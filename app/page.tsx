@@ -4,6 +4,7 @@ import { Card, Space, Typography } from "antd";
 const pages = [
   { href: "/rhf-subscribe-test", label: "react-hook-form 订阅回调测试" },
   { href: "/on-value-change-test", label: "onValueChange 函数测试" },
+  { href: "/multi-effect-test", label: "多 effect 联动测试" },
   { href: "/array-test", label: "array-test" },
   { href: "/demo-showcase", label: "demo-showcase" },
   { href: "/dynamic-example", label: "dynamic-example" },
@@ -11,6 +12,10 @@ const pages = [
   { href: "/perf-array", label: "perf-array" },
   { href: "/test-dirty-api", label: "test-dirty-api" },
   { href: "/test-dirty-include-rule", label: "test-dirty-include-rule" },
+  {
+    href: "/test-pre-init-array-object",
+    label: "test-pre-init-array-object",
+  },
   { href: "/on-dirty-change-test", label: "onDirtyChange 函数测试" },
   { href: "/test-include-policy", label: "test-include-policy" },
   { href: "/validation-demo", label: "validation-demo" },

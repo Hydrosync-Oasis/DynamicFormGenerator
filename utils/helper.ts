@@ -80,7 +80,7 @@ export function compileOneMutableNode(
         removeWhenNoChildren: item.removeWhenNoChildren ?? true,
       },
       staticProp: {
-        schema: item.arraySchema!,
+        arraySchema: item.arraySchema!,
         LayoutComponent: item.LayoutComponent,
       },
       children: [],

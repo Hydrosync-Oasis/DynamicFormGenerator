@@ -20,23 +20,17 @@ export type ControlType =
 export type FieldType = "array" | "object" | "field";
 
 export type EffectInvokeReason =
-  | "children-updated"
   | "value-changed"
   | "dependencies-collecting"
   | "initial-run";
-
-export type ReactiveEffectContext = FormCommands & {
-  track: (path: FieldPath) => FieldValue;
-};
 
 export type FormCommands = {
   getValue: (path: FieldPath) => FieldValue;
   setVisible: (path: FieldPath, visible: boolean) => void;
   setValue: (
     path: FieldPath,
-    values: Record<string, FieldValue>,
+    values: any,
     option: {
-      invokeOnChange?: boolean;
       invokeEffect?: boolean;
     },
     keepStrategy: ValueMergeStrategy,
@@ -68,10 +62,18 @@ export interface ReactiveRule {
   fn: ReactiveEffect;
 }
 
+export type ValueProxy = {
+  [key in string]: ValueProxy;
+} & ((option?: GetValueOption) => any);
+
+export type GetValueOption = {
+  raw?: boolean;
+};
+
 export type ReactiveEffect = (
-  ctx: ReactiveEffectContext,
+  value: ValueProxy,
+  command: FormCommands,
   cause: EffectInvokeReason,
-  info?: { changedPath?: FieldPath },
 ) => void;
 
 export type FieldSource = "initial" | "user" | "source";
@@ -273,44 +275,27 @@ type MutableFieldNodeBaseType<type extends FieldType> = {
         /** 刚初始化的节点，不需要渲染 */
         dirty: "uninitialized";
       };
-  cache: NodeCache<type>;
+  cache: NodeCache;
 };
 
-export type ComparablePlainObject<T extends FieldType> = T extends "field"
-  ?
-      | {
-          include: false;
-        }
-      | { include: true; value: any }
-  : T extends "object"
-    ? { include: boolean }
-    :
-        | { include: true; order: FieldKey[] }
-        | {
-            include: false;
-          };
-
-export type NodeCache<T extends FieldType> = {
+export type NodeCache = {
   /** 存储表单提交后导出的普通对象的缓存 */
-  plainObj: { lastValue: ComparablePlainObject<T> } & (
+  plainObj:
     | {
+        rawData: Record<string, any> | undefined;
         validateData: Record<string, any> | undefined;
         submitData: Record<string, any> | undefined;
         type: "ready";
       }
     | {
-        validateData: Record<string, any> | undefined;
-        submitData: Record<string, any> | undefined;
+        // 脏
         type: "dirty";
       }
     | {
-        // 完全新的节点，没值
-        type: "dirty";
-      }
-    | {
+        // 包括include=false的节点
+        rawData: Record<string, any> | undefined;
         type: "void";
-      }
-  );
+      };
   // dirty代表不知道有哪些规则集，必须遍历所有子节点收集规则集
   validator:
     | "dirty"
@@ -352,7 +337,7 @@ export type MutableFieldNode<T extends FieldType> = T extends "field"
         dynamicProp: NestedFieldDynamicProp;
         staticProp: {
           /** 定义了数组单个元素的结构体 */
-          schema: ArraySchema;
+          arraySchema: ArraySchema;
           LayoutComponent?: React.ElementType<{
             render: (state: ImmutableFormState) => React.ReactNode;
             state: ImmutableFormState;
@@ -418,7 +403,7 @@ export type InitialValueObject =
   | {
       type: "array";
       key: string;
-      schema: ArraySchema;
+      arraySchema: ArraySchema;
       children: InitialValueObject[];
       include: boolean;
     };

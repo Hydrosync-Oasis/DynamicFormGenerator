@@ -1,6 +1,6 @@
+import { validateHeaderName } from "http";
 import { compileOneMutableNode } from "./helper";
 import { markMutableNodeDirty, setMutableNode } from "./immutableHelper";
-import { setNodeDirtyOnChain as updateDirtyOnChain } from "./nodeDirtyNotifyHelper";
 import { FormModel, getNodesOnPath } from "./structures";
 import { SubscribeManager } from "./subscribeManager";
 import { SubscribeNode } from "./subscribeType";
@@ -54,12 +54,12 @@ export function compareNodeDirty(
       throw new Error("shape is incompitable");
     }
     if (current.children.length !== initial.children.length) {
-      return false;
+      return true;
     }
     for (let i in current.children) {
       if (current.children[i].key !== initial.children[i].key) {
         // 顺序不同
-        return false;
+        return true;
       }
       if (current.children[i].cache.selfDirty) {
         return true;
@@ -113,7 +113,7 @@ export class DirtyManager {
         return {
           type: "array",
           key,
-          schema: current.staticProp.schema,
+          arraySchema: current.staticProp.arraySchema,
           include,
           children: current.children.map((x) => dfs(x)),
         };
@@ -121,6 +121,7 @@ export class DirtyManager {
 
       throw new Error("type is invalid");
     };
+
     return dfs(this.currentValue);
   }
 
@@ -161,7 +162,7 @@ export class DirtyManager {
         dfs2(
           item,
           currentEffectiveInclude && item.dynamicProp.include,
-          subNode?.children.get(item.key),
+          subNode?.children?.get(item.key),
         );
       }
     };
@@ -188,8 +189,7 @@ export class DirtyManager {
         if (current && current.type !== "field") {
           throw new Error("shape is incompitable");
         }
-        const afterInitialEffInclude =
-          initialEffInclude && (initial.include = fieldValue.hasValue);
+        initial.include = fieldValue.hasValue;
         if (fieldValue.hasValue) {
           initial.value = fieldValue.value;
         }
@@ -203,18 +203,16 @@ export class DirtyManager {
           subNode &&
             notifyNodeDirtyChanged(
               subNode,
-              currentEffectiveInclude !== afterInitialEffInclude ||
-                newSelfDirty,
+              currentEffectiveInclude !== initialEffInclude ||
+                (currentEffectiveInclude && newSelfDirty),
             );
 
           current.cache.selfDirty = newSelfDirty;
         } else {
-          subNode && notifyNodeDirtyChanged(subNode, afterInitialEffInclude);
+          subNode && notifyNodeDirtyChanged(subNode, initialEffInclude);
         }
       } else if (initial.type === "object") {
-        const afterInitialEffInclude =
-          initialEffInclude && (initial.include = fieldValue.hasValue);
-
+        initial.include = fieldValue.hasValue;
         if (current?.type && current.type !== "object") {
           throw new Error("shape is incompitable");
         }
@@ -233,8 +231,8 @@ export class DirtyManager {
               childCurrent,
               currentEffectiveInclude &&
                 (childCurrent?.dynamicProp?.include ?? false),
-              initialEffInclude || false,
-              subNode?.children.get(key),
+              initialEffInclude || item.include,
+              subNode?.children?.get(key),
             );
             if (childCurrent) {
               // 子节点的脏
@@ -254,18 +252,17 @@ export class DirtyManager {
           subNode &&
             notifyNodeDirtyChanged(
               subNode,
-              currentEffectiveInclude !== afterInitialEffInclude || newDirty,
+              currentEffectiveInclude !== initialEffInclude ||
+                (currentEffectiveInclude && newDirty),
             );
 
           current.cache.selfDirty = newDirty;
         } else {
-          subNode && notifyNodeDirtyChanged(subNode, afterInitialEffInclude);
+          subNode && notifyNodeDirtyChanged(subNode, initialEffInclude);
         }
       } else {
         // 数组
-        const beforeInitialEffInclude = initialEffInclude && initial.include;
-        const afterInitialEffInclude =
-          initialEffInclude && (initial.include = fieldValue.hasValue);
+        initial.include = fieldValue.hasValue;
 
         if (current && current.type !== "array") {
           throw new Error("shape is incompitable");
@@ -280,11 +277,7 @@ export class DirtyManager {
           // 目前先全量编译
           const newChildren = this.compileArrayValueToInitial(
             fieldValue.value,
-            {
-              key: "dummy",
-              isArray: true,
-              arraySchema: initial.schema,
-            },
+            initial.arraySchema,
           );
           initial.children = newChildren.children;
           // 替换为新initialValue
@@ -293,13 +286,16 @@ export class DirtyManager {
               (x) => x.key === item.key,
             );
             dfs(
-              fieldValue.value,
+              {
+                hasValue: item.key in fieldValue.value,
+                value: fieldValue.value[item.key],
+              },
               item,
               currentChild,
               currentEffectiveInclude &&
                 (currentChild?.dynamicProp?.include ?? false),
-              initialEffInclude && initial.include,
-              subNode?.children.get(item.key),
+              initialEffInclude && item.include,
+              subNode?.children?.get(item.key),
             );
 
             if (currentChild) {
@@ -319,7 +315,7 @@ export class DirtyManager {
             dfs2(
               currentChild,
               currentEffectiveInclude && currentChild.dynamicProp.include,
-              subNode?.children.get(key),
+              subNode?.children?.get(key),
             );
           }
         }
@@ -334,7 +330,8 @@ export class DirtyManager {
           subNode &&
             notifyNodeDirtyChanged(
               subNode,
-              newDirty || currentEffectiveInclude !== initialEffInclude,
+              (currentEffectiveInclude && newDirty) ||
+                currentEffectiveInclude !== initialEffInclude,
             );
 
           current.cache.selfDirty = newDirty;
@@ -343,7 +340,6 @@ export class DirtyManager {
         }
       }
     };
-
     const current = FormModel.findNodeByPath(this.currentValue, path);
     dfs(
       {
@@ -415,7 +411,7 @@ export class DirtyManager {
 
       const nextKey = path[i];
       if (nextKey !== undefined) {
-        subNode = subNode?.children.get(nextKey);
+        subNode = subNode?.children?.get(nextKey);
       }
     }
   }
@@ -448,7 +444,7 @@ export class DirtyManager {
         for (let child of field.children) {
           notifySubtree(
             child,
-            sub?.children.get(child.key),
+            sub?.children?.get(child.key),
             effectiveInclude && child.dynamicProp.include,
             del,
           );
@@ -498,7 +494,7 @@ export class DirtyManager {
             }
             dfs(
               item,
-              subNode?.children.get(item.key),
+              subNode?.children?.get(item.key),
               childInitialObj,
               currentEffectiveInclude && field.dynamicProp.include,
             );
@@ -526,7 +522,7 @@ export class DirtyManager {
             if (cur) {
               dfs(
                 cur,
-                subNode?.children.get(cur.key),
+                subNode?.children?.get(cur.key),
                 item,
                 currentEffectiveInclude && field.dynamicProp.include,
               );
@@ -536,7 +532,7 @@ export class DirtyManager {
               const newNode = this.compileArrayInitialToMutable(
                 field.path.concat(item.key),
                 item,
-                initialValue.schema,
+                initialValue.arraySchema,
                 field,
               );
               afterResetChildren.push(newNode);
@@ -552,13 +548,13 @@ export class DirtyManager {
 
           // 通知被删除的节点
           oldNodes.forEach((node) =>
-            notifySubtree(node, subNode?.children.get(node.key), false, true),
+            notifySubtree(node, subNode?.children?.get(node.key), false, true),
           );
           // 通知新增的节点
           newNodes.forEach((node) =>
             notifySubtree(
               node,
-              subNode?.children.get(node.key),
+              subNode?.children?.get(node.key),
               currentEffectiveInclude && field.dynamicProp.include,
               false,
             ),
@@ -600,7 +596,7 @@ export class DirtyManager {
 
           notifyIncludeChangedSubtree(
             child,
-            subNode?.children.get(child.key),
+            subNode?.children?.get(child.key),
             childInitial,
             currentEffInclude && child.dynamicProp.include,
             initialEffInclude && (childInitial?.include ?? false),
@@ -807,7 +803,7 @@ export class DirtyManager {
           arrayNode.children.push(
             dfs(
               item,
-              { ...initialValue.schema, key },
+              { ...initialValue.arraySchema, key },
               path.concat(key),
               arrayNode,
             ),
@@ -834,7 +830,7 @@ export class DirtyManager {
    */
   private compileArrayValueToInitial(
     value: any,
-    schema: FieldSchema & { isArray: true },
+    schema: ArraySchema,
   ): InitialValueObject & { type: "array" } {
     const dfs = (
       schema: FieldSchema,
@@ -860,12 +856,12 @@ export class DirtyManager {
         // 对象
         const children: InitialValueObject[] = [];
         for (let item of schema.childrenFields) {
-          const hasValue =
-            fieldValueStatus.hasValue && item.key in fieldValueStatus.value;
           children.push(
             dfs(item, {
-              hasValue,
-              value: value[item.key],
+              hasValue:
+                fieldValueStatus.hasValue && item.key in fieldValueStatus.value,
+              value:
+                fieldValueStatus.hasValue && fieldValueStatus.value[item.key],
             }),
           );
         }
@@ -882,7 +878,7 @@ export class DirtyManager {
           return {
             type: "array",
             key: schema.key,
-            schema,
+            arraySchema: schema.arraySchema,
             include: false,
             children: [],
           };
@@ -900,14 +896,17 @@ export class DirtyManager {
         return {
           type: "array",
           key: schema.key,
-          schema,
+          arraySchema: schema.arraySchema,
           children: children,
           include: true,
         };
       }
     };
 
-    return dfs(schema, { hasValue: true, value }) as InitialValueObject & {
+    return dfs(
+      { key: "dummy", isArray: true, arraySchema: schema },
+      { hasValue: true, value },
+    ) as InitialValueObject & {
       type: "array";
     };
   }
@@ -952,6 +951,11 @@ export class DirtyManager {
     return current;
   }
 
+  /**
+   * 获取初始值对象
+   * @param path 不包含虚拟根节点的路径
+   * @returns 未找到返回undefined
+   */
   findInitialValue(path: FieldPath) {
     let res: InitialValueObject | undefined = undefined;
     try {
