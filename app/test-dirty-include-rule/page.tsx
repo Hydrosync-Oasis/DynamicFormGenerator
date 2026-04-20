@@ -255,7 +255,7 @@ export default function TestDirtyIncludeRulePage() {
   // 注册联动规则
   useEffect(() => {
     // 规则1: 根据用户类型控制不同字段组的显示和隐藏
-    const rule1 = model.current.registerRule((ctx, cause) => {
+    const rule1 = model.current.effect((ctx, cause) => {
       const userType = ctx.track(["userType"]);
 
       if (cause === "initial-run" || cause === "value-changed") {
@@ -293,7 +293,7 @@ export default function TestDirtyIncludeRulePage() {
     });
 
     // 规则2: VIP等级联动 - 至尊会员自动显示联系地址
-    const rule2 = model.current.registerRule((ctx, cause) => {
+    const rule2 = model.current.effect((ctx, cause) => {
       const userType = ctx.track(["userType"]);
       const vipLevel = ctx.track(["vipInfo", "vipLevel"]);
 
@@ -310,7 +310,7 @@ export default function TestDirtyIncludeRulePage() {
     });
 
     // 规则3: 企业用户注册资本联动
-    const rule3 = model.current.registerRule((ctx, cause) => {
+    const rule3 = model.current.effect((ctx, cause) => {
       const userType = ctx.track(["userType"]);
       const registeredCapital = ctx.track([
         "enterpriseInfo",

@@ -1,3 +1,4 @@
+import { never } from "zod";
 import { FieldKey } from "./type";
 
 export type SubscribeTopic = keyof typeof ValueTypeOfProps;
@@ -15,6 +16,7 @@ export const ValueTypeOfProps = {
   touch: "lazy",
   value: "lazy",
   error: "immediate",
+  effect: "immediate",
 } as const;
 
 export function IsLazyTopic(topic: SubscribeTopic): topic is LazyTopic {
@@ -38,17 +40,21 @@ export type SubscribePropValueType<T extends SubscribeTopic> = T extends "value"
       | {
           hasValue: false;
         }
-  : boolean;
+  : T extends "effect"
+    ? void
+    : boolean;
 
 export type SubscribeNode = {
   key: FieldKey;
-  children: Map<FieldKey, SubscribeNode>;
+  children?: Map<FieldKey, SubscribeNode>;
   subscriber: Partial<{
     [K in SubscribeTopic]: {
-      value: {
-        old?: SubscribePropValueType<K>;
-        current: SubscribePropCurrentObject<K>;
-      };
+      value: K extends "effect"
+        ? void
+        : {
+            old?: SubscribePropValueType<K>;
+            current: SubscribePropCurrentObject<K>;
+          };
       fn: Set<Function>;
     };
   }>;

@@ -25,10 +25,6 @@ export type EffectInvokeReason =
   | "dependencies-collecting"
   | "initial-run";
 
-export type ReactiveEffectContext = FormCommands & {
-  track: (path: FieldPath) => FieldValue;
-};
-
 export type FormCommands = {
   getValue: (path: FieldPath) => FieldValue;
   setVisible: (path: FieldPath, visible: boolean) => void;
@@ -68,10 +64,14 @@ export interface ReactiveRule {
   fn: ReactiveEffect;
 }
 
+export type InternalValueProxy = {
+  [key in string]: InternalValueProxy;
+} & (() => any);
+
 export type ReactiveEffect = (
-  ctx: ReactiveEffectContext,
+  value: InternalValueProxy,
+  command: FormCommands,
   cause: EffectInvokeReason,
-  info?: { changedPath?: FieldPath },
 ) => void;
 
 export type FieldSource = "initial" | "user" | "source";
@@ -292,7 +292,7 @@ export type ComparablePlainObject<T extends FieldType> = T extends "field"
 
 export type NodeCache<T extends FieldType> = {
   /** 存储表单提交后导出的普通对象的缓存 */
-  plainObj: { lastValue: ComparablePlainObject<T> } & (
+  plainObj:
     | {
         validateData: Record<string, any> | undefined;
         submitData: Record<string, any> | undefined;
@@ -309,8 +309,7 @@ export type NodeCache<T extends FieldType> = {
       }
     | {
         type: "void";
-      }
-  );
+      };
   // dirty代表不知道有哪些规则集，必须遍历所有子节点收集规则集
   validator:
     | "dirty"

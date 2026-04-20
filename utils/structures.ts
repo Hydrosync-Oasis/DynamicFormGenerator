@@ -18,14 +18,13 @@ import {
   ImmutableFormState,
   EffectInvokeReason,
   ReactiveEffect,
-  ReactiveEffectContext,
   ReactiveRule,
   FormCommands,
   FieldSource,
   ValueMergeStrategy,
   InitialValueObject,
-  FieldType,
   AnyMutableFieldNode,
+  InternalValueProxy,
 } from "./type";
 import {
   compileArrayMutableNode,
@@ -41,7 +40,8 @@ import {
   setNodeValueOnChain,
   setNodeValue,
 } from "./nodeValueGetterHelper";
-import { root } from "postcss";
+import { setNodeDirtyOnChain } from "./nodeDirtyNotifyHelper";
+import { tr } from "zod/locales";
 
 interface FormSchema {
   fields: FieldSchema[];
@@ -128,14 +128,12 @@ class FormModel {
   private validatorCacheManager: ValidatorCacheManager;
 
   /** 字段脏状态缓存管理器 */
-  private dirtyValueCacheManager: DirtyManager;
+  private dirtyManager: DirtyManager;
 
   /** 精细发布订阅管理器 */
   private subscribeManager: SubscribeManager;
 
   private listeners = new Set<() => void>();
-
-  private rules: Set<ReactiveRule> = new Set();
 
   public formCommands: FormCommands = {
     getValue: (path: FieldPath) => this.get(path, "value"),
@@ -184,7 +182,6 @@ class FormModel {
       snapshot: { dirty: true },
       cache: {
         plainObj: {
-          lastValue: { include: false },
           type: "dirty",
           validateData: undefined,
           submitData: undefined,
@@ -224,7 +221,7 @@ class FormModel {
 
     // 初始化字段脏状态缓存管理器
     // 初始化时将可变字段树中的数据置为默认值
-    this.dirtyValueCacheManager = new DirtyManager(
+    this.dirtyManager = new DirtyManager(
       this.mutableDataSource,
       this.subscribeManager,
     );
@@ -342,7 +339,7 @@ class FormModel {
       throw new Error("dirty value");
     }
     if (plainObj.type === "void") {
-      this.dirtyValueCacheManager.setInitialValue(
+      this.dirtyManager.setInitialValue(
         path,
         {
           include: false,
@@ -352,7 +349,7 @@ class FormModel {
         },
       );
     } else {
-      this.dirtyValueCacheManager.setInitialValue(
+      this.dirtyManager.setInitialValue(
         path,
         {
           include: true,
@@ -380,7 +377,7 @@ class FormModel {
     initialValue: any,
     shouldNotify: boolean = false,
   ) {
-    this.dirtyValueCacheManager.setInitialValue(
+    this.dirtyManager.setInitialValue(
       path,
       {
         include: true,
@@ -467,7 +464,7 @@ class FormModel {
     // 所有的update都是顺着祖先链，所以只需要更新当前节点
     this.validatorCacheManager.updateNode(node);
     this.plainCacheManager.updateNode(node);
-    this.dirtyValueCacheManager.updateNode(node);
+    this.dirtyManager.updateNode(node);
   }
 
   setInclude(path: FieldPath, include: boolean) {
@@ -494,7 +491,7 @@ class FormModel {
     keepStrategy?: ValueMergeStrategy,
     shouldNotify: boolean = false,
   ) {
-    this.setValuesInternal(path, values, "user", option, keepStrategy);
+    this.setValueInternal(path, values, "user", option, keepStrategy);
 
     if (shouldNotify) {
       this.notify();
@@ -503,7 +500,61 @@ class FormModel {
     this.subscribeManager.notify();
   }
 
-  private setValuesInternal(
+  // 对新增/删除的节点，额外通知值变化
+  private notifyNodeTree(
+    fieldNode: AnyMutableFieldNode,
+    subscribeNode: SubscribeNode | undefined,
+    initial: InitialValueObject | undefined,
+    del: boolean,
+    currentEffInclude: boolean,
+    initialEffInclude: boolean,
+  ) {
+    if (!subscribeNode) {
+      return;
+    }
+
+    // 通知值
+    if (!del) {
+      setNodeValue(
+        fieldNode,
+        this.subscribeManager,
+        subscribeNode,
+        this.plainCacheManager,
+      );
+    } else {
+      setNodeHasNoValue(this.subscribeManager, subscribeNode);
+    }
+
+    if (fieldNode.type !== "field") {
+      if (initial?.type === "field") {
+        throw new Error("type is error");
+      }
+      fieldNode.children.forEach((childNode) => {
+        const childInitial = initial?.children.find(
+          (x) => x.key === childNode.key,
+        );
+        this.notifyNodeTree(
+          childNode,
+          subscribeNode.children?.get(childNode.key),
+          childInitial,
+          del,
+          currentEffInclude && childNode.dynamicProp.include,
+          initialEffInclude && (childInitial?.include ?? false),
+        );
+      });
+    }
+
+    fieldNode.cache.selfDirty = compareNodeDirty(fieldNode, initial ?? null);
+
+    this.subscribeManager.setNewValue(
+      subscribeNode,
+      "dirty",
+      currentEffInclude !== initialEffInclude ||
+        (currentEffInclude && fieldNode.cache.selfDirty),
+    );
+  }
+
+  private setValueInternal(
     path: FieldPath,
     values: Record<string, any>,
     source: FieldSource,
@@ -512,8 +563,7 @@ class FormModel {
     },
     keepStrategy: ValueMergeStrategy = "merge",
   ) {
-    const triggerRules = option?.invokeEffect ?? true;
-    const initialValue = this.dirtyValueCacheManager.findInitialValue(path);
+    const initialValue = this.dirtyManager.findInitialValue(path);
     const keepPrevious = keepStrategy === "merge";
 
     setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
@@ -553,7 +603,7 @@ class FormModel {
                   n,
                   value[n.key],
                   childInitial,
-                  subscribeNode?.children.get(n.key),
+                  subscribeNode?.children?.get(n.key),
                   currentEffInclude && n.dynamicProp.include,
                   initialEffInclude && (childInitial?.include ?? false),
                 )
@@ -568,7 +618,7 @@ class FormModel {
                   n,
                   undefined,
                   childInitial,
-                  subscribeNode?.children.get(n.key),
+                  subscribeNode?.children?.get(n.key),
                   currentEffInclude && n.dynamicProp.include,
                   initialEffInclude && (childInitial?.include ?? false),
                 )
@@ -604,7 +654,7 @@ class FormModel {
                   childNode,
                   v,
                   childInitial,
-                  subscribeNode?.children.get(key),
+                  subscribeNode?.children?.get(key),
                   currentEffInclude && childNode.dynamicProp.include,
                   initialEffInclude && (childInitial?.include ?? false),
                 )
@@ -639,71 +689,14 @@ class FormModel {
             );
           });
 
-          // 对新增/删除的节点，额外通知值变化
-          const notifyNodeTree = (
-            fieldNode: AnyMutableFieldNode,
-            subscribeNode: SubscribeNode | undefined,
-            initial: InitialValueObject | undefined,
-            del: boolean,
-            currentEffInclude: boolean,
-            initialEffInclude: boolean,
-          ) => {
-            if (!subscribeNode) {
-              return;
-            }
-
-            // 通知值
-            if (!del) {
-              setNodeValue(
-                fieldNode,
-                this.subscribeManager,
-                subscribeNode,
-                this.plainCacheManager,
-              );
-            } else {
-              setNodeHasNoValue(this.subscribeManager, subscribeNode);
-            }
-
-            if (fieldNode.type !== "field") {
-              if (initial?.type === "field") {
-                throw new Error("type is error");
-              }
-              fieldNode.children.forEach((childNode) => {
-                const childInitial = initial?.children.find(
-                  (x) => x.key === childNode.key,
-                );
-                notifyNodeTree(
-                  childNode,
-                  subscribeNode.children.get(childNode.key),
-                  childInitial,
-                  del,
-                  currentEffInclude && childNode.dynamicProp.include,
-                  initialEffInclude && (childInitial?.include ?? false),
-                );
-              });
-            }
-
-            fieldNode.cache.selfDirty = compareNodeDirty(
-              fieldNode,
-              initial ?? null,
-            );
-
-            this.subscribeManager.setNewValue(
-              subscribeNode,
-              "dirty",
-              currentEffInclude !== initialEffInclude ||
-                (currentEffInclude && fieldNode.cache.selfDirty),
-            );
-          };
-
           // 处理新增节点
           newNodes.forEach((newNode) => {
             const childInitial = initial?.children.find(
               (x) => x.key === newNode.key,
             );
-            notifyNodeTree(
+            this.notifyNodeTree(
               newNode,
-              subscribeNode?.children.get(newNode.key),
+              subscribeNode?.children?.get(newNode.key),
               childInitial,
               false,
               currentEffInclude && newNode.dynamicProp.include,
@@ -716,12 +709,12 @@ class FormModel {
               const childInitial = initial?.children.find(
                 (x) => x.key === delNode.key,
               );
-              notifyNodeTree(
+              this.notifyNodeTree(
                 delNode,
-                subscribeNode?.children.get(delNode.key),
+                subscribeNode?.children?.get(delNode.key),
                 childInitial,
                 true,
-                currentEffInclude && delNode.dynamicProp.include,
+                false,
                 initialEffInclude && (childInitial?.include ?? false),
               );
             });
@@ -738,7 +731,7 @@ class FormModel {
               const dfs = (field: AnyMutableFieldNode, sub: SubscribeNode) => {
                 if (field.type !== "field") {
                   field.children.forEach((item) => {
-                    const childSub = sub.children.get(item.key);
+                    const childSub = sub.children?.get(item.key);
                     if (childSub) {
                       dfs(item, childSub);
                     }
@@ -765,28 +758,15 @@ class FormModel {
           // 更新selfDirty（保证了自底向上）
           node.cache.selfDirty = compareNodeDirty(node, initial ?? null);
 
-          if (triggerRules) {
-            this.triggerEffectsFor(
-              node.rootArrayField ?? node,
-              "value-changed",
-            );
-          }
           // 订阅通知
           if (subscribeNode) {
             // 通知值
+            // 通知effectiveDirty
             setNodeValue(
               node,
               this.subscribeManager,
               subscribeNode,
               this.plainCacheManager,
-            );
-
-            // 通知effectiveDirty
-            this.subscribeManager.setNewValue(
-              subscribeNode,
-              "dirty",
-              (currentEffInclude && node.cache.selfDirty) ||
-                initialEffInclude !== currentEffInclude,
             );
           }
 
@@ -809,7 +789,7 @@ class FormModel {
         initialValue,
         subNode,
         FormModel.getEffIncludeValue(node),
-        this.dirtyValueCacheManager.getEffIncludeValue(path),
+        this.dirtyManager.getEffIncludeValue(path),
       );
       subNode &&
         setNodeValueOnChain(
@@ -818,12 +798,12 @@ class FormModel {
           subNode,
           this.plainCacheManager,
         );
-      this.dirtyValueCacheManager.updateNode(node);
+      this.dirtyManager.updateNode(node);
       return ret;
     });
   }
 
-  static getEffIncludeValue(node: AnyMutableFieldNode) {
+  static getEffIncludeValue(node: AnyMutableFieldNode | undefined) {
     let current: AnyMutableFieldNode | undefined = node;
     while (current) {
       if (!current.dynamicProp.include) {
@@ -856,7 +836,7 @@ class FormModel {
 
     // TODO
     // required
-    setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
+    setMutableNode(this.mutableDataSource, path, (node) => {
       if (node.type === "field") {
         node.dynamicProp.validation[ruleSet] = validator;
         this.validatorCacheManager.updateNode(node);
@@ -965,42 +945,75 @@ class FormModel {
     key?: FieldKey,
     shouldNotify: boolean = false,
   ) {
-    const node = this.findNodeByPath(path);
-    if (!node) throw new Error("the field is not found");
-    if (node.type !== "array") {
+    const field = this.findNodeByPath(path);
+    if (!field) throw new Error("the field is not found");
+    if (field.type !== "array") {
       throw new Error("this field is not an array:" + path);
     }
-    const schema = node.staticProp.schema;
+    const subNode = this.subscribeManager.findNode(path);
+    const initial = this.dirtyManager.findInitialValue(path);
+    if (initial && initial?.type !== "array") {
+      throw new Error("type is incompitable");
+    }
+    const schema = field.staticProp.schema;
 
     const newNodes: AnyMutableFieldNode[] = Object.entries(value).map(
       ([k, v]) => {
         return compileArrayMutableNode(
           v,
           { ...schema, key: k },
-          node.path.concat(k),
-          node.rootArrayField || node,
+          field.path.concat(k),
+          field.rootArrayField || field,
           "user",
-          node,
+          field,
         );
       },
     );
 
-    const targetIndex = node.children.findIndex((child) => child.key === key);
+    const curEffInclude = FormModel.getEffIncludeValue(field);
+    const initEffInclude = this.dirtyManager.getEffIncludeValue(path);
+    newNodes.forEach((field) => {
+      const childInitial = initial?.children.find((x) => x.key === field.key);
+      this.notifyNodeTree(
+        field,
+        subNode?.children?.get(field.key),
+        childInitial,
+        false,
+        curEffInclude && field.dynamicProp.include,
+        initEffInclude && (childInitial?.include ?? false),
+      );
+    });
+
+    const targetIndex = field.children.findIndex((child) => child.key === key);
 
     // 根据 position 参数决定插入位置
     let insertIndex = position === "before" ? targetIndex : targetIndex + 1;
     if (targetIndex === -1) {
-      insertIndex = position === "before" ? 0 : node.children.length;
+      insertIndex = position === "before" ? 0 : field.children.length;
     }
 
-    setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
-      if (node.type !== "array") {
-        throw new Error("this field is not an array:" + path);
-      }
-      node.children.splice(insertIndex, 0, ...newNodes);
+    field.children.splice(insertIndex, 0, ...newNodes);
+    markMutableNodeDirty(field);
+
+    this.plainCacheManager.updateNode(field);
+    this.validatorCacheManager.updateNode(field);
+    this.dirtyManager.updateDirtyOnChain(path, (subNode, _field, dirty) => {
+      this.subscribeManager.setNewValue(subNode, "dirty", dirty);
     });
-    this.plainCacheManager.updateNode(node);
-    this.validatorCacheManager.updateNode(node);
+
+    subNode &&
+      setNodeValueOnChain(
+        field,
+        this.subscribeManager,
+        subNode,
+        this.plainCacheManager,
+      );
+    setNodeDirtyOnChain(
+      path,
+      this.subscribeManager,
+      this.mutableDataSource,
+      this.dirtyManager,
+    );
     if (shouldNotify) {
       this.notify();
     }
@@ -1021,6 +1034,8 @@ class FormModel {
   ) {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error("the field is not found");
+    const subNode = this.subscribeManager.findNode(path);
+    const initialNode = this.dirtyManager.findInitialValue(path);
     if (node.type !== "array") {
       throw new Error("this field is not an array:" + path);
     }
@@ -1032,12 +1047,18 @@ class FormModel {
         throw new Error("the target key is not found in array: " + key);
       }
 
-      setMutableNode(this.mutableDataSource, path, (node, _nodes, update) => {
-        if (node.type !== "array") {
-          throw new Error("this field is not an array:" + path);
-        }
-        node.children.splice(targetIndex, 1);
-      });
+      // 通知
+      this.notifyNodeTree(
+        node,
+        subNode,
+        initialNode,
+        true,
+        false,
+        this.dirtyManager.getEffIncludeValue(path),
+      );
+
+      node.children.splice(targetIndex, 1);
+      markMutableNodeDirty(node);
     } else {
       // 设置或更新元素
       const hasKey = node.children.some((child) => child.key === key);
@@ -1051,7 +1072,7 @@ class FormModel {
           path,
           { [key]: value },
           { invokeEffect: shouldTriggerRule },
-          undefined,
+          "merge",
           false,
         );
       }
@@ -1069,15 +1090,31 @@ class FormModel {
     return mutableNodeToImmutableNode(this.mutableDataSource);
   }
 
+  private buildPathProxy = (
+    path: FieldPath,
+    invokeNotify: (path: FieldPath) => void,
+  ): InternalValueProxy => {
+    return new Proxy(() => path, {
+      apply(target) {
+        const path = target();
+        invokeNotify(path);
+        return path;
+      },
+      get: (target, key: string) => {
+        return this.buildPathProxy(target().concat(key), invokeNotify);
+      },
+    }) as InternalValueProxy;
+  };
+
   /** 注册规则 */
-  registerRule(effect: ReactiveEffect) {
+  effect(effectFn: ReactiveEffect) {
     // 自动分析该副作用的依赖
     const deps: FieldPath[] = [];
-    effect(
+    effectFn(
+      this.buildPathProxy([], (path) => {
+        deps.push(path);
+      }),
       {
-        track: (path: FieldPath) => {
-          void deps.push(path);
-        },
         getValue: () => void 0,
         setVisible: () => void 0,
         setValue: () => void 0,
@@ -1091,75 +1128,36 @@ class FormModel {
       "dependencies-collecting",
     );
     // 将依赖装入Rule
-    const rule: ReactiveRule = { deps, fn: effect };
-    this.rules.add(rule);
+    const rule: ReactiveRule = { deps, fn: effectFn };
+    const unsubFn: (() => void)[] = [];
     // 建 dep 索引
     rule.deps.forEach((dep) => {
-      const node = this.findNodeByPath(dep);
-      if (!node) throw new Error("the field is not found: " + dep);
-      if (!node.effect) node.effect = new Set();
-      node.effect.add(rule.fn);
+      const subscriber = () => {
+        // xxx
+        const effSub = this.subscribeManager.subscribeEffect(effectFn);
+      };
+      this.subscribeManager.subscribe(dep, "value", subscriber);
+      unsubFn.push(() =>
+        this.subscribeManager.unsubscribe(dep, "value", subscriber),
+      );
     });
   }
 
   /** 主动触发一次全量规则（初始化时可用） */
   initial() {
-    this.runEffects(
-      new Set(
-        [...this.rules].map((r) => {
-          return r.fn;
-        }),
-      ),
-      "initial-run",
-    );
     this.plainCacheManager.rebuild(this.mutableDataSource);
     this.validatorCacheManager.rebuild();
-    this.dirtyValueCacheManager.setInitialValue(
+    this.dirtyManager.setInitialValue(
       [],
       {
         include: true,
-        value: this.plainCacheManager.finalData.validateData,
+        value: this.plainCacheManager.getFinalPlainObject(false),
       },
       (sub, dirty) => {
         this.subscribeManager.setNewValue(sub, "dirty", dirty);
       },
     );
     this.notify();
-  }
-
-  /**
-   * 运行指定的副作用函数
-   * @param effects 副作用函数数组
-   */
-  private runEffects(
-    effects: Set<ReactiveEffect>,
-    cause: EffectInvokeReason,
-    info?: { changedPath?: FieldPath },
-  ) {
-    for (const effect of effects) {
-      effect(
-        {
-          ...this.formCommands,
-          // 唯一多出来的函数，用于跟踪依赖
-          track: (path) => this.get(path, "value"),
-        },
-        cause,
-        info,
-      );
-    }
-    this.notify();
-  }
-
-  triggerEffectsFor(node: AnyMutableFieldNode, cause: EffectInvokeReason) {
-    // 如果节点有 rootArrayField，禁止触发
-    if (node.rootArrayField) {
-      throw new Error("should not trigger the nodes which have rootArrayField");
-    }
-
-    const set = node.effect;
-    if (set) {
-      this.runEffects(set, cause, { changedPath: node.path });
-    }
   }
 
   /**
@@ -1483,7 +1481,7 @@ class FormModel {
     if (!node) {
       throw new Error("the field is not found: " + targetPath.join("."));
     }
-    this.dirtyValueCacheManager.resetField(node, (field, subNode) => {
+    this.dirtyManager.resetField(node, (field, subNode) => {
       field && this.plainCacheManager.updateNode(field);
       field && this.validatorCacheManager.updateNode(field);
       field && markMutableNodeDirty(field);
@@ -1499,7 +1497,6 @@ class FormModel {
 
         this.subscribeManager.setNewValue(subNode, "dirty", false);
       }
-      field && this.triggerEffectsFor(field, "value-changed");
     });
     // 重建缓存
     this.plainCacheManager.rebuild(this.mutableDataSource);
@@ -1524,5 +1521,4 @@ export type {
   MutableFieldNode,
   EffectInvokeReason,
   ReactiveEffect,
-  ReactiveEffectContext,
 };

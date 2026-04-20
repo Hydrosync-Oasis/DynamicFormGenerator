@@ -93,7 +93,7 @@ export default function DynamicExamplePage() {
       }),
     );
 
-    model.registerRule((ctx) => {
+    model.effect((ctx) => {
       const userType = ctx.track(["userType"]);
       // 条件显示：企业显示公司名
       ctx.setVisible(["companyName"], userType === "company");

@@ -10,9 +10,12 @@ import { FieldPath } from "./type";
 
 export class SubscribeManager {
   subscribeTree: SubscribeNode;
+  effects: Set<SubscribeNode>;
+
   private queue1: Set<SubscribeNode>;
   private queue2: Set<SubscribeNode>;
   private isQueue1: boolean;
+  readonly MAX_COUNT = 1000;
 
   constructor() {
     this.subscribeTree = {
@@ -24,6 +27,8 @@ export class SubscribeManager {
     this.queue1 = new Set();
     this.queue2 = new Set();
     this.isQueue1 = true;
+
+    this.effects = new Set();
   }
 
   private get currentQueue() {
@@ -76,6 +81,10 @@ export class SubscribeManager {
       return true;
     }
 
+    if (prop === "effect") {
+      return false;
+    }
+
     return oldValue === currentValue;
   }
 
@@ -98,7 +107,7 @@ export class SubscribeManager {
   findNode(path: FieldPath): SubscribeNode | undefined {
     let cur = this.subscribeTree;
     for (let key of path) {
-      const next = cur.children.get(key);
+      const next = cur.children?.get(key);
       if (!next) {
         return undefined;
       }
@@ -107,19 +116,21 @@ export class SubscribeManager {
     return cur;
   }
 
-  setNewValue<T extends SubscribeTopic>(
+  setNewValue<T extends Exclude<SubscribeTopic, "effect">>(
     subscribeNode: SubscribeNode,
     topic: T,
     value: SubscribePropCurrentObject<T>,
   ) {
     const subscriber = subscribeNode.subscriber;
-    if (!subscriber[topic]) {
-      subscriber[topic] = {
+    let subTopic: SubscribeNode["subscriber"][T] | undefined =
+      subscriber[topic];
+    if (subTopic === undefined) {
+      subscriber[topic] = subTopic = {
         fn: new Set(),
         value: this.createInitialTopicValue(topic),
       };
     }
-    subscriber[topic].value.current = value;
+    subTopic!.value.current = value;
 
     this.markAsShouldNotify(subscribeNode);
   }
@@ -128,17 +139,31 @@ export class SubscribeManager {
     this.currentQueue.add(subscribeNode);
   }
 
-  subscribe<T extends SubscribeTopic>(
+  subscribeEffect(effectFn: Function): SubscribeNode {
+    const subNode: SubscribeNode = {
+      key: "no-key",
+      subscriber: {
+        effect: {
+          value: void 0,
+          fn: new Set([effectFn]),
+        },
+      },
+      parent: undefined,
+    };
+    this.effects.add(subNode);
+    return subNode;
+  }
+
+  subscribe<T extends Exclude<SubscribeTopic, "effect">>(
     path: FieldPath,
     topic: T,
     subscriber: Function,
     fallback?: SubscribePropCurrentObject<T>,
   ) {
     let curNode = this.subscribeTree;
-    console.log("sub");
 
     for (const key of path) {
-      const nextNode = curNode.children.get(key);
+      const nextNode = curNode.children?.get(key);
       if (!nextNode) {
         const createdNode: SubscribeNode = {
           key,
@@ -146,6 +171,9 @@ export class SubscribeManager {
           subscriber: {},
           parent: curNode,
         };
+        if (!curNode.children) {
+          curNode.children = new Map();
+        }
         curNode.children.set(key, createdNode);
         curNode = createdNode;
         continue;
@@ -170,52 +198,64 @@ export class SubscribeManager {
   }
 
   notify() {
-    this.swapQueue();
-    this.currentQueue.forEach((subNode) => {
-      Object.entries(subNode.subscriber).forEach(([topic]) => {
-        this.notifyOneNode(subNode, topic as SubscribeTopic);
+    let count = 0;
+    while (true) {
+      const cur = this.currentQueue;
+      if (cur.size === 0) {
+        return;
+      }
+      this.swapQueue();
+      cur.forEach((subNode) => {
+        Object.entries(subNode.subscriber).forEach(([topic]) => {
+          this.notifyOneNode(subNode, topic as SubscribeTopic);
+          count++;
+          if (count >= this.MAX_COUNT) {
+            throw new Error("max effect depth exceeded");
+          }
+        });
       });
-    });
-
-    this.currentQueue.clear();
+      cur.clear();
+    }
   }
 
   private notifyOneNode(subscribeNode: SubscribeNode, topic: SubscribeTopic) {
     const subscriber = subscribeNode.subscriber;
-    const topicSubscriber = subscriber[topic];
-    if (topicSubscriber === undefined) {
+    if (subscriber[topic] === undefined) {
       return;
     }
-    if (topicSubscriber.value.current === undefined) {
-      return;
-    }
+    if (topic !== "effect") {
+      const topicSubscriber = subscriber[topic];
+      if (topicSubscriber.value.current === undefined) {
+        return;
+      }
 
-    let curVal = undefined;
-    if (isLazyTopic(topic)) {
-      curVal = subscriber[topic]?.value.current?.valueGetter?.();
+      let curVal = undefined;
+      if (isLazyTopic(topic)) {
+        curVal = subscriber[topic]?.value.current?.valueGetter?.();
+      } else {
+        curVal = subscriber[topic]?.value.current;
+      }
+
+      if (this.isEqualByProp(topic, topicSubscriber.value.old, curVal)) {
+        return;
+      }
+
+      for (let item of topicSubscriber.fn) {
+        item(curVal);
+      }
+      topicSubscriber.value.old = curVal;
     } else {
-      curVal = subscriber[topic]?.value.current;
+      const topicSubscriber = subscriber[topic];
+      topicSubscriber.fn.forEach((f) => f());
     }
-
-    if (this.isEqualByProp(topic, topicSubscriber.value.old, curVal)) {
-      return;
-    }
-
-    for (let item of topicSubscriber.fn) {
-      item(curVal);
-    }
-    topicSubscriber.value.old = curVal;
   }
 
   unsubscribe(path: FieldPath, topic: SubscribeTopic, subscriber: Function) {
-    console.log("unsub");
-    // debugger;
-
     let curNode = this.subscribeTree;
     const visitedNodes: SubscribeNode[] = [curNode];
 
     for (const key of path) {
-      const nextNode = curNode.children.get(key);
+      const nextNode = curNode.children?.get(key);
       if (!nextNode) {
         return;
       }
@@ -235,16 +275,16 @@ export class SubscribeManager {
 
     for (let i = visitedNodes.length - 1; i > 0; i--) {
       const node = visitedNodes[i];
-      const hasChildren = node.children.size > 0;
+      const hasChildren = node.children && node.children.size > 0;
       // 只删除没有子节点且没有剩余订阅存在的
       if (hasChildren || this.hasSubscribers(node)) {
         break;
       }
 
-      this.currentQueue.delete(node);
+      this.wipQueue.delete(node);
 
       const parent = visitedNodes[i - 1];
-      parent.children.delete(node.key);
+      parent.children!.delete(node.key);
     }
   }
 }

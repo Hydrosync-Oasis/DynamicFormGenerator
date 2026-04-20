@@ -34,7 +34,7 @@ export function setNodeDirtyOnChain(
       initial = initial.children.find((x) => x.key === key);
     }
 
-    sub = sub?.children.get(key);
+    sub = sub?.children?.get(key);
 
     currentEffectiveInclude =
       currentEffectiveInclude && (field?.dynamicProp.include ?? false);

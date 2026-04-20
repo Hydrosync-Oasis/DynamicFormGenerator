@@ -337,7 +337,7 @@ export default function ArrayTestPage() {
   // 初始化：设置数组初始数据
   useEffect(() => {
     // 注册联动规则1：根据IP数量自动调整服务器数组项数
-    model.registerRule((ctx, cause) => {
+    model.effect((ctx, cause) => {
       const ipAddresses = ctx.track(["ipAddresses"]);
 
       if (typeof ipAddresses === "string" && ipAddresses.trim()) {
@@ -381,7 +381,7 @@ export default function ArrayTestPage() {
     });
 
     // 注册联动规则2：根据协议类型显示/隐藏SSL证书路径
-    model.registerRule((ctx, cause) => {
+    model.effect((ctx, cause) => {
       const serversValue = ctx.track(["servers"]);
       console.log(serversValue);
 
@@ -409,7 +409,7 @@ export default function ArrayTestPage() {
     });
 
     // 注册联动规则1：根据IP数量自动调整服务器数组项数
-    model.registerRule((ctx, cause) => {
+    model.effect((ctx, cause) => {
       const ipAddresses = ctx.track(["ipAddresses2"]);
 
       if (typeof ipAddresses === "string" && ipAddresses.trim()) {
@@ -452,7 +452,7 @@ export default function ArrayTestPage() {
     });
 
     // 注册联动规则3：当 servers 变化时，更新虚拟字段 serversMemory
-    model.registerRule((ctx, cause) => {
+    model.effect((ctx, cause) => {
       const servers = ctx.track(["servers"]) || {};
 
       // 更新虚拟字段
@@ -460,7 +460,7 @@ export default function ArrayTestPage() {
     });
 
     // 注册联动规则4：当 servers2 变化时，更新虚拟字段 serversMemory
-    model.registerRule((ctx, cause) => {
+    model.effect((ctx, cause) => {
       const servers2 = ctx.track(["servers2"]) || {};
 
       // 更新虚拟字段（完整数据，会自动合并）
@@ -468,7 +468,7 @@ export default function ArrayTestPage() {
     });
 
     // 注册联动规则5：当虚拟字段 serversMemory 变化时，同步到 servers 和 servers2
-    model.registerRule((ctx, cause) => {
+    model.effect((ctx, cause) => {
       const total = ctx.track(["serversMemory"]) || {};
 
       // 获取 servers 和 servers2 的当前值（不作为依赖项）

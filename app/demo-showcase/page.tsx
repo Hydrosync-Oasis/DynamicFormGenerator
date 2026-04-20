@@ -532,7 +532,7 @@ export default function DemoShowcasePage() {
   const [currentStep, setCurrentStep] = useState(0);
 
   useEffect(() => {
-    model.registerRule((ctx) => {
+    model.effect((ctx) => {
       const planType = ctx.track(["planning", "planType"]);
       const validator =
         planType === "enterprise"
@@ -541,7 +541,7 @@ export default function DemoShowcasePage() {
       ctx.setValidation(["planning", "teamSize"], validator);
     });
 
-    model.registerRule((ctx) => {
+    model.effect((ctx) => {
       const mode = ctx.track(["planning", "needCustomIntegration"]);
       const needDetail = mode === "custom";
       ctx.setVisible(["planning", "integrationNotes"], needDetail);
@@ -553,12 +553,12 @@ export default function DemoShowcasePage() {
       );
     });
 
-    model.registerRule((ctx) => {
+    model.effect((ctx) => {
       const enabled = ctx.track(["deployment", "enableAutoScaling"]);
       ctx.setVisible(["deployment", "autoScalingMax"], !!enabled);
     });
 
-    model.registerRule((ctx) => {
+    model.effect((ctx) => {
       const country = ctx.track(["compliance", "billingCountry"]);
       const requireVat = ["de", "fr", "uk"].includes(country);
       ctx.setVisible(["compliance", "vatNumber"], requireVat);
@@ -570,7 +570,7 @@ export default function DemoShowcasePage() {
       );
     });
 
-    model.registerRule((ctx) => {
+    model.effect((ctx) => {
       const needsLegal = ctx.track(["approvals", "needsLegalReview"]);
       const visible = needsLegal === "yes";
       ctx.setVisible(["approvals", "legalContact"], visible);
@@ -582,7 +582,7 @@ export default function DemoShowcasePage() {
       );
     });
 
-    model.registerRule((ctx) => {
+    model.effect((ctx) => {
       const risk = ctx.track(["deployment", "riskLevel"]);
       const showNote = risk === "high";
       ctx.setVisible(["approvals", "riskMitigationNote"], showNote);
