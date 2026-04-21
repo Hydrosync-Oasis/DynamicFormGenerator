@@ -20,7 +20,6 @@ export type ControlType =
 export type FieldType = "array" | "object" | "field";
 
 export type EffectInvokeReason =
-  | "children-updated"
   | "value-changed"
   | "dependencies-collecting"
   | "initial-run";
@@ -30,9 +29,8 @@ export type FormCommands = {
   setVisible: (path: FieldPath, visible: boolean) => void;
   setValue: (
     path: FieldPath,
-    values: Record<string, FieldValue>,
+    values: any,
     option: {
-      invokeOnChange?: boolean;
       invokeEffect?: boolean;
     },
     keepStrategy: ValueMergeStrategy,
@@ -64,12 +62,16 @@ export interface ReactiveRule {
   fn: ReactiveEffect;
 }
 
-export type InternalValueProxy = {
-  [key in string]: InternalValueProxy;
+export type ValueProxy = {
+  [key in string]: ValueProxy;
 } & (() => any);
 
+export type GetValueOption = {
+  raw?: boolean;
+};
+
 export type ReactiveEffect = (
-  value: InternalValueProxy,
+  value: ValueProxy,
   command: FormCommands,
   cause: EffectInvokeReason,
 ) => void;
@@ -273,7 +275,7 @@ type MutableFieldNodeBaseType<type extends FieldType> = {
         /** 刚初始化的节点，不需要渲染 */
         dirty: "uninitialized";
       };
-  cache: NodeCache<type>;
+  cache: NodeCache;
 };
 
 export type ComparablePlainObject<T extends FieldType> = T extends "field"
@@ -290,7 +292,7 @@ export type ComparablePlainObject<T extends FieldType> = T extends "field"
             include: false;
           };
 
-export type NodeCache<T extends FieldType> = {
+export type NodeCache = {
   /** 存储表单提交后导出的普通对象的缓存 */
   plainObj:
     | {

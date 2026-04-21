@@ -1,6 +1,5 @@
 import { compileOneMutableNode } from "./helper";
 import { markMutableNodeDirty, setMutableNode } from "./immutableHelper";
-import { setNodeDirtyOnChain as updateDirtyOnChain } from "./nodeDirtyNotifyHelper";
 import { FormModel, getNodesOnPath } from "./structures";
 import { SubscribeManager } from "./subscribeManager";
 import { SubscribeNode } from "./subscribeType";
@@ -54,12 +53,12 @@ export function compareNodeDirty(
       throw new Error("shape is incompitable");
     }
     if (current.children.length !== initial.children.length) {
-      return false;
+      return true;
     }
     for (let i in current.children) {
       if (current.children[i].key !== initial.children[i].key) {
         // 顺序不同
-        return false;
+        return true;
       }
       if (current.children[i].cache.selfDirty) {
         return true;

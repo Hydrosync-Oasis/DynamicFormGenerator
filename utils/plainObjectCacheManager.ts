@@ -50,7 +50,7 @@ class PlainObjectCacheManager {
   rebuild<T extends FieldType>(node: MutableFieldNode<T>) {
     function dfs<T extends FieldType>(
       node: MutableFieldNode<T>,
-    ): NodeCache<FieldType>["plainObj"] & { type: "ready" | "void" } {
+    ): NodeCache["plainObj"] & { type: "ready" | "void" } {
       const include = node.dynamicProp.include;
 
       if (node.type === "field") {
@@ -59,13 +59,8 @@ class PlainObjectCacheManager {
           return plainObj;
         }
 
-        const curVal: ComparablePlainObject<"field"> = {
-          include,
-          value: node.dynamicProp.value,
-        };
-
         // 更新缓存
-        if (!curVal.include) {
+        if (!include) {
           node.cache.plainObj = {
             ...node.cache.plainObj,
             type: "void",
@@ -74,8 +69,8 @@ class PlainObjectCacheManager {
           node.cache.plainObj = {
             ...node.cache.plainObj,
             type: "ready",
-            validateData: curVal.include && curVal.value,
-            submitData: curVal.include && curVal.value,
+            validateData: include && node.dynamicProp.value,
+            submitData: include && node.dynamicProp.value,
           };
         }
 
@@ -115,6 +110,12 @@ class PlainObjectCacheManager {
       } else {
         if (node.cache.plainObj.type !== "dirty") {
           return node.cache.plainObj;
+        }
+
+        if (!node.dynamicProp.include) {
+          return (node.cache.plainObj = {
+            type: "void",
+          });
         }
 
         const validateObj: Record<FieldKey, any> = {};

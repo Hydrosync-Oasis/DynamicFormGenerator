@@ -4,21 +4,27 @@ import {
   SubscribePropValueType,
   SubscribeTopic,
   ValueTypeOfProps,
-  IsLazyTopic as isLazyTopic,
+  isLazyTopic as isLazyTopic,
+  EffectNode,
+  NotifiableNode,
+  isVoidTopic,
+  isImmediateTopic,
+  isNonVoidTopic,
 } from "./subscribeType";
-import { FieldPath } from "./type";
+import { FieldPath, FormCommands, ValueProxy } from "./type";
 
 export class SubscribeManager {
   subscribeTree: SubscribeNode;
-  effects: Set<SubscribeNode>;
+  effects: Set<EffectNode>;
 
-  private queue1: Set<SubscribeNode>;
-  private queue2: Set<SubscribeNode>;
+  private queue1: Set<NotifiableNode>;
+  private queue2: Set<NotifiableNode>;
   private isQueue1: boolean;
   readonly MAX_COUNT = 1000;
 
   constructor() {
     this.subscribeTree = {
+      type: "sub",
       key: "dummy",
       children: new Map(),
       subscriber: {},
@@ -135,26 +141,30 @@ export class SubscribeManager {
     this.markAsShouldNotify(subscribeNode);
   }
 
-  markAsShouldNotify(subscribeNode: SubscribeNode) {
+  markAsShouldNotify(subscribeNode: NotifiableNode) {
     this.currentQueue.add(subscribeNode);
   }
 
-  subscribeEffect(effectFn: Function): SubscribeNode {
-    const subNode: SubscribeNode = {
-      key: "no-key",
-      subscriber: {
-        effect: {
-          value: void 0,
-          fn: new Set([effectFn]),
-        },
-      },
-      parent: undefined,
+  subscribeEffect(
+    effectFn: Function,
+    getValueProxy: ValueProxy,
+    formCommands: FormCommands,
+    invokeFirst: boolean = true,
+  ): EffectNode {
+    const subNode: EffectNode = {
+      type: "effect",
+      effFnArg: [getValueProxy, formCommands, "initial-run"],
+      fn: effectFn,
     };
     this.effects.add(subNode);
+    if (invokeFirst) {
+      this.markAsShouldNotify(subNode);
+    }
+    subNode.effFnArg[2] = "value-changed";
     return subNode;
   }
 
-  subscribe<T extends Exclude<SubscribeTopic, "effect">>(
+  subscribe<T extends SubscribeTopic>(
     path: FieldPath,
     topic: T,
     subscriber: Function,
@@ -166,6 +176,7 @@ export class SubscribeManager {
       const nextNode = curNode.children?.get(key);
       if (!nextNode) {
         const createdNode: SubscribeNode = {
+          type: "sub",
           key,
           children: new Map(),
           subscriber: {},
@@ -184,16 +195,24 @@ export class SubscribeManager {
 
     const topicSubscriber = curNode.subscriber[topic];
     if (!topicSubscriber) {
-      curNode.subscriber[topic] = {
-        value: this.createInitialTopicValue(topic),
-        fn: new Set(),
-      };
+      if (isVoidTopic(topic)) {
+        curNode.subscriber[topic] = {
+          value: void 0,
+          fn: new Set(),
+        };
+      }
+      if (isNonVoidTopic(topic)) {
+        curNode.subscriber[topic] = {
+          value: this.createInitialTopicValue(topic),
+          fn: new Set(),
+        };
+      }
     }
 
     curNode.subscriber[topic]!.fn.add(subscriber);
     if (fallback) {
       this.setNewValue(curNode, topic, fallback);
-      this.notifyOneNode(curNode, topic);
+      // this.notifyOneNode(curNode, topic);
     }
   }
 
@@ -206,48 +225,62 @@ export class SubscribeManager {
       }
       this.swapQueue();
       cur.forEach((subNode) => {
-        Object.entries(subNode.subscriber).forEach(([topic]) => {
-          this.notifyOneNode(subNode, topic as SubscribeTopic);
-          count++;
-          if (count >= this.MAX_COUNT) {
-            throw new Error("max effect depth exceeded");
-          }
-        });
+        if (subNode.type === "effect") {
+          this.notifyOneNode(subNode, "effect");
+        } else {
+          Object.entries(subNode.subscriber).forEach(([topic]) => {
+            this.notifyOneNode(subNode, topic as SubscribeTopic);
+            if (count >= this.MAX_COUNT) {
+              throw new Error("max effect depth exceeded");
+            }
+          });
+        }
       });
       cur.clear();
+      count++;
     }
   }
 
-  private notifyOneNode(subscribeNode: SubscribeNode, topic: SubscribeTopic) {
-    const subscriber = subscribeNode.subscriber;
-    if (subscriber[topic] === undefined) {
-      return;
-    }
-    if (topic !== "effect") {
-      const topicSubscriber = subscriber[topic];
-      if (topicSubscriber.value.current === undefined) {
+  private notifyOneNode(node: NotifiableNode, topic: SubscribeTopic) {
+    if (node.type === "sub" && topic !== "effect") {
+      const subscriber = node.subscriber;
+      if (subscriber[topic] === undefined) {
         return;
+      }
+
+      if (isImmediateTopic(topic) || isLazyTopic(topic)) {
+        const topicSubscriber = subscriber[topic];
+        if (topicSubscriber.value.current === undefined) {
+          return;
+        }
       }
 
       let curVal = undefined;
       if (isLazyTopic(topic)) {
         curVal = subscriber[topic]?.value.current?.valueGetter?.();
-      } else {
+      }
+      if (isImmediateTopic(topic)) {
         curVal = subscriber[topic]?.value.current;
       }
 
-      if (this.isEqualByProp(topic, topicSubscriber.value.old, curVal)) {
+      if (this.isEqualByProp(topic, subscriber[topic].value.old, curVal)) {
         return;
       }
 
-      for (let item of topicSubscriber.fn) {
+      for (let item of subscriber[topic].fn) {
         item(curVal);
       }
-      topicSubscriber.value.old = curVal;
+      subscriber[topic].value.old = curVal;
+    } else if (node.type === "effect") {
+      node.fn.apply(undefined, node.effFnArg);
     } else {
-      const topicSubscriber = subscriber[topic];
-      topicSubscriber.fn.forEach((f) => f());
+      node.subscriber[topic as "effect"]?.fn.forEach((fn) => fn());
     }
+  }
+
+  unsubscribeEffect(subscribeNode: EffectNode) {
+    this.effects.delete(subscribeNode);
+    this.wipQueue.delete(subscribeNode);
   }
 
   unsubscribe(path: FieldPath, topic: SubscribeTopic, subscriber: Function) {

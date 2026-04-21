@@ -1,66 +1,66 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Alert, Button, Card, Divider, Space, Tag, Typography } from "antd";
 import { z } from "zod";
 import { Generator } from "@/utils/generator";
 import { FieldPath, FieldSchema, FormModel } from "@/utils/structures";
 
-type ChangeLog = {
+type CallbackLog = {
   ts: number;
-  from: string;
-  value: any;
+  listener: "value" | "dirty";
+  path: string;
+  value: unknown;
 };
 
-const NAME_PATH: FieldPath = ["name"];
-const USERS_PATH: FieldPath = ["users"];
-const ARRAY_NICKNAME_PATH: FieldPath = ["users", "u1", "nickname"];
-const ARRAY_DEEP_ALIAS_PATH: FieldPath = [
-  "users",
-  "u1",
-  "profile",
-  "contact",
-  "alias",
-];
+const FORM_TITLE_PATH: FieldPath = ["formTitle"];
+const TASKS_PATH: FieldPath = ["tasks"];
+const TASK_A_TITLE_PATH: FieldPath = ["tasks", "taskA", "title"];
+const TASK_A_NOTE_PATH: FieldPath = ["tasks", "taskA", "detail", "note"];
 
 export default function OnValueChangeTestPage() {
   const schema = useMemo(
     () => ({
       fields: [
         {
-          key: "name",
-          label: "姓名",
+          key: "formTitle",
+          label: "表单标题",
           control: "input",
-          defaultValue: "init",
-          validate: z.string().min(1, "请输入姓名"),
+          defaultValue: "Sprint Plan",
+          validate: z.string().min(1, "请输入标题"),
         },
         {
-          key: "users",
+          key: "tasks",
           isArray: true,
           arraySchema: {
             isArray: false,
             childrenFields: [
               {
-                key: "nickname",
-                label: "昵称",
+                key: "title",
+                label: "任务标题",
                 control: "input",
-                validate: z.string().min(1, "请输入昵称"),
+                validate: z.string().min(1, "请输入任务标题"),
               },
               {
-                key: "profile",
+                key: "status",
+                label: "状态",
+                control: "input",
+                validate: z.string().min(1, "请输入状态"),
+              },
+              {
+                key: "detail",
                 isArray: false,
                 childrenFields: [
                   {
-                    key: "contact",
-                    isArray: false,
-                    childrenFields: [
-                      {
-                        key: "alias",
-                        label: "深层别名",
-                        control: "input",
-                        validate: z.string().min(1, "请输入深层别名"),
-                      },
-                    ],
+                    key: "note",
+                    label: "备注",
+                    control: "input",
+                    validate: z.string().min(1, "请输入备注"),
                   },
                 ],
               },
@@ -73,47 +73,72 @@ export default function OnValueChangeTestPage() {
   );
 
   const [model] = useState(() => new FormModel(schema));
-  const [logs, setLogs] = useState<ChangeLog[]>([]);
+  const [logs, setLogs] = useState<CallbackLog[]>([]);
   const [subscribeResultType, setSubscribeResultType] = useState<string[]>([]);
   const [unsubscribeFn, setUnsubscribeFn] = useState<
     undefined | (() => void)
   >();
 
+  const formData = useSyncExternalStore(
+    model.subscribe.bind(model),
+    model.getJSONData.bind(model),
+    model.getJSONData.bind(model),
+  );
+
   useEffect(() => {
     model.initial();
 
-    const logChange = (from: string, value: any) => {
+    const logChange = (
+      listener: "value" | "dirty",
+      path: string,
+      value: unknown,
+    ) => {
       setLogs((prev) =>
-        [{ ts: Date.now(), from, value }, ...prev].slice(0, 20),
+        [{ ts: Date.now(), listener, path, value }, ...prev].slice(0, 40),
       );
     };
 
-    const unsubName = model.onValueChange(NAME_PATH, (value) => {
-      logChange("name", value);
-    });
-    const unsubArrayNode = model.onValueChange(ARRAY_NICKNAME_PATH, (value) => {
-      logChange("users.u1.nickname", value);
-    });
-    const unsubArrayDeepNode = model.onValueChange(
-      ARRAY_DEEP_ALIAS_PATH,
-      (value) => {
-        logChange("users.u1.profile.contact.alias", value);
-      },
-    );
+    const valueUnsubs = [
+      model.onValueChange(FORM_TITLE_PATH, (value) => {
+        logChange("value", "formTitle", value);
+      }),
+      model.onValueChange(TASKS_PATH, (value) => {
+        logChange("value", "tasks", value);
+      }),
+      model.onValueChange(TASK_A_TITLE_PATH, (value) => {
+        logChange("value", "tasks.taskA.title", value);
+      }),
+      model.onValueChange(TASK_A_NOTE_PATH, (value) => {
+        logChange("value", "tasks.taskA.detail.note", value);
+      }),
+    ];
+
+    const dirtyUnsubs = [
+      model.onDirtyChange(FORM_TITLE_PATH, (dirty) => {
+        logChange("dirty", "formTitle", dirty);
+      }),
+      model.onDirtyChange(TASKS_PATH, (dirty) => {
+        logChange("dirty", "tasks", dirty);
+      }),
+      model.onDirtyChange(TASK_A_TITLE_PATH, (dirty) => {
+        logChange("dirty", "tasks.taskA.title", dirty);
+      }),
+      model.onDirtyChange(TASK_A_NOTE_PATH, (dirty) => {
+        logChange("dirty", "tasks.taskA.detail.note", dirty);
+      }),
+    ];
 
     setSubscribeResultType([
-      typeof unsubName,
-      typeof unsubArrayNode,
-      typeof unsubArrayDeepNode,
+      ...valueUnsubs.map((x) => typeof x),
+      ...dirtyUnsubs.map((x) => typeof x),
     ]);
 
     const mergedUnsub = () => {
-      unsubName();
-      unsubArrayNode();
-      unsubArrayDeepNode();
+      [...valueUnsubs, ...dirtyUnsubs].forEach((fn) => fn());
     };
 
     setUnsubscribeFn(() => mergedUnsub);
+
     console.log(model);
 
     return mergedUnsub;
@@ -122,106 +147,147 @@ export default function OnValueChangeTestPage() {
   const callbackCount = logs.length;
   const lastLog = logs[0];
   const counterMap = logs.reduce<Record<string, number>>((acc, item) => {
-    acc[item.from] = (acc[item.from] ?? 0) + 1;
+    const key = `${item.listener}:${item.path}`;
+    acc[key] = (acc[key] ?? 0) + 1;
     return acc;
   }, {});
 
-  const triggerByApi = (value: string) => {
+  const setFormTitleBySetValue = (value: string) => {
     model.setValue(
       [],
-      { name: value },
+      { formTitle: value },
       { invokeEffect: true },
-      undefined,
+      "merge",
       true,
     );
   };
 
-  const triggerArrayCreateAndSetByApi = (nickname: string, alias: string) => {
-    model.setValue(
-      [],
+  const insertTaskA = () => {
+    model.insertIntoArray(
+      TASKS_PATH,
       {
-        users: {
-          u1: {
-            nickname,
-            profile: {
-              contact: {
-                alias,
-              },
-            },
+        taskA: {
+          title: "task-a-v1",
+          status: "todo",
+          detail: {
+            note: "created-by-insert",
           },
         },
       },
-      { invokeEffect: true },
+      "after",
       undefined,
       true,
     );
   };
 
-  const triggerArrayNicknameSetByApi = (value: string) => {
-    model.setValue(
-      [],
+  const insertTaskBBeforeTaskA = () => {
+    model.insertIntoArray(
+      TASKS_PATH,
       {
-        users: {
-          u1: {
-            nickname: value,
+        taskB: {
+          title: "task-b-v1",
+          status: "todo",
+          detail: {
+            note: "insert-before-taskA",
           },
         },
       },
-      { invokeEffect: true },
-      undefined,
+      "before",
+      "taskA",
       true,
     );
   };
 
-  const triggerArrayDeepSetByItemPath = (value: string) => {
-    model.setValue(
-      ["users", "u1"],
+  const updateTaskABySetItem = () => {
+    const suffix = Date.now().toString().slice(-4);
+    model.setItemOfArray(
+      TASKS_PATH,
+      "taskA",
       {
-        profile: {
-          contact: {
-            alias: value,
+        title: `task-a-v${suffix}`,
+        status: "doing",
+        detail: {
+          note: `updated-by-setItem-${suffix}`,
+        },
+      },
+      true,
+      true,
+    );
+  };
+
+  const deleteTaskABySetItem = () => {
+    model.setItemOfArray(TASKS_PATH, "taskA", undefined, true, true);
+  };
+
+  const runCoordinationFlow = () => {
+    setLogs([]);
+    model.resetField(undefined, true);
+    model.insertIntoArray(
+      TASKS_PATH,
+      {
+        taskA: {
+          title: "task-a-seq",
+          status: "todo",
+          detail: {
+            note: "seq-step-1",
           },
         },
       },
-      { invokeEffect: true },
+      "after",
       undefined,
       true,
     );
-  };
-
-  const triggerArrayDeepSetByLeafParentPath = (value: string) => {
-    model.setValue(
-      ["users", "u1", "profile", "contact"],
+    model.setItemOfArray(
+      TASKS_PATH,
+      "taskA",
       {
-        alias: value,
+        title: "task-a-seq-updated",
+        status: "doing",
+        detail: {
+          note: "seq-step-2",
+        },
       },
-      { invokeEffect: true },
-      undefined,
+      true,
       true,
     );
-  };
-
-  const triggerArraySetEmptyByApi = () => {
-    model.setValue(
-      [],
+    model.insertIntoArray(
+      TASKS_PATH,
       {
-        users: [],
+        taskB: {
+          title: "task-b-seq",
+          status: "todo",
+          detail: {
+            note: "seq-step-3",
+          },
+        },
       },
-      { invokeEffect: true },
-      "replace",
+      "before",
+      "taskA",
       true,
     );
+    model.setItemOfArray(TASKS_PATH, "taskA", undefined, true, true);
   };
+
+  const tasksDirty = !!model.findNodeByPath(TASKS_PATH)?.cache.selfDirty;
+  const taskATitleDirty =
+    !!model.findNodeByPath(TASK_A_TITLE_PATH)?.cache.selfDirty;
 
   return (
     <div className="p-6">
-      <Card title="onValueChange 函数测试页">
+      <Card title="表单生成器协同测试页：数组 API + onValueChange/onDirtyChange">
         <Space direction="vertical" size={12} className="w-full">
           <Alert
             type="info"
             showIcon
-            message="测试说明"
-            description="页面初始化时会订阅 name、users.u1.nickname 和 users.u1.profile.contact.alias。先点击“创建数组项并设置深层字段”，再点击两个 alias 更新按钮和“设置 users 为空数组”，确认数组深层字段在创建、更新和清空时都能正常触发订阅通知。"
+            message="测试目标"
+            description="验证数组 API（insertIntoArray、setItemOfArray）执行时，onValueChange 与 onDirtyChange 是否能在数组节点和数组内叶子节点上协调触发。"
+          />
+
+          <Alert
+            type="warning"
+            showIcon
+            message="推荐验证顺序"
+            description="先点击“一键运行协调流程”，再用下方按钮单步复现。重点观察 tasks、tasks.taskA.title、tasks.taskA.detail.note 的 value/dirty 回调次数和最新值。"
           />
 
           <Space wrap>
@@ -231,43 +297,58 @@ export default function OnValueChangeTestPage() {
             <Tag color={callbackCount > 0 ? "green" : "red"}>
               总回调次数: {callbackCount}
             </Tag>
-            <Tag>name: {counterMap["name"] ?? 0}</Tag>
-            <Tag>users.u1.nickname: {counterMap["users.u1.nickname"] ?? 0}</Tag>
+            <Tag>value:formTitle = {counterMap["value:formTitle"] ?? 0}</Tag>
+            <Tag>dirty:formTitle = {counterMap["dirty:formTitle"] ?? 0}</Tag>
+            <Tag>value:tasks = {counterMap["value:tasks"] ?? 0}</Tag>
+            <Tag>dirty:tasks = {counterMap["dirty:tasks"] ?? 0}</Tag>
             <Tag>
-              users.u1.profile.contact.alias:{" "}
-              {counterMap["users.u1.profile.contact.alias"] ?? 0}
+              value:tasks.taskA.title ={" "}
+              {counterMap["value:tasks.taskA.title"] ?? 0}
             </Tag>
-            <Tag>最后一次来源: {lastLog?.from ?? "-"}</Tag>
+            <Tag>
+              dirty:tasks.taskA.title ={" "}
+              {counterMap["dirty:tasks.taskA.title"] ?? 0}
+            </Tag>
+            <Tag>
+              value:tasks.taskA.detail.note ={" "}
+              {counterMap["value:tasks.taskA.detail.note"] ?? 0}
+            </Tag>
+            <Tag>
+              dirty:tasks.taskA.detail.note ={" "}
+              {counterMap["dirty:tasks.taskA.detail.note"] ?? 0}
+            </Tag>
+            <Tag color={tasksDirty ? "red" : "green"}>
+              cache.selfDirty(tasks): {tasksDirty ? "true" : "false"}
+            </Tag>
+            <Tag color={taskATitleDirty ? "red" : "green"}>
+              cache.selfDirty(tasks.taskA.title):{" "}
+              {taskATitleDirty ? "true" : "false"}
+            </Tag>
+            <Tag>最后一次监听类型: {lastLog?.listener ?? "-"}</Tag>
+            <Tag>最后一次来源: {lastLog?.path ?? "-"}</Tag>
             <Tag>最后一次值: {JSON.stringify(lastLog?.value)}</Tag>
           </Space>
 
           <Space wrap>
-            <Button onClick={() => triggerByApi("Alice")}>
-              API 设置 name=Alice
+            <Button onClick={runCoordinationFlow}>一键运行协调流程</Button>
+            <Button onClick={() => setFormTitleBySetValue("Sprint Plan")}>
+              setValue 标题=初始值
             </Button>
-            <Button onClick={() => triggerByApi("Bob")}>
-              API 设置 name=Bob
+            <Button onClick={() => setFormTitleBySetValue("Sprint Plan 2")}>
+              setValue 标题=变更值
             </Button>
-            <Button
-              onClick={() =>
-                triggerArrayCreateAndSetByApi("Tom", "tom-contact")
-              }
-            >
-              创建数组项并设置深层字段
+            <Button onClick={insertTaskA}>insertIntoArray 新增 taskA</Button>
+            <Button onClick={insertTaskBBeforeTaskA}>
+              insertIntoArray 在 taskA 前插入 taskB
             </Button>
-            <Button onClick={() => triggerArrayNicknameSetByApi("Jerry")}>
-              更新数组项 nickname=Jerry
+            <Button onClick={updateTaskABySetItem}>
+              setItemOfArray 更新 taskA
             </Button>
-            <Button onClick={() => triggerArrayDeepSetByItemPath("spike-item")}>
-              通过数组项路径设置 alias
+            <Button onClick={deleteTaskABySetItem}>
+              setItemOfArray 删除 taskA
             </Button>
-            <Button
-              onClick={() => triggerArrayDeepSetByLeafParentPath("spike-leaf")}
-            >
-              通过深层父路径设置 alias
-            </Button>
-            <Button onClick={triggerArraySetEmptyByApi}>
-              设置 users 为空数组
+            <Button onClick={() => model.resetField(undefined, true)}>
+              resetField 全量重置
             </Button>
             <Button onClick={() => setLogs([])}>清空日志</Button>
             <Button
@@ -278,17 +359,26 @@ export default function OnValueChangeTestPage() {
                 }
               }}
             >
-              尝试取消订阅
+              取消全部订阅
             </Button>
           </Space>
 
           <Divider />
 
-          <Generator model={model} displayFields={[NAME_PATH, USERS_PATH]} />
+          <Generator
+            model={model}
+            displayFields={[FORM_TITLE_PATH, TASKS_PATH]}
+            displayOption={{ showDebug: true }}
+          />
 
           <Divider />
 
-          <Typography.Text strong>最近回调日志（最多 20 条）</Typography.Text>
+          <Typography.Text strong>当前提交数据</Typography.Text>
+          <pre className="rounded bg-gray-100 p-3 text-xs leading-5">
+            {JSON.stringify(formData, null, 2)}
+          </pre>
+
+          <Typography.Text strong>监听回调日志（最多 40 条）</Typography.Text>
           <pre className="rounded bg-gray-100 p-3 text-xs leading-5">
             {JSON.stringify(logs, null, 2)}
           </pre>
