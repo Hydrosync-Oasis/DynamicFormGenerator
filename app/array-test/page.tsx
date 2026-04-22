@@ -336,10 +336,6 @@ export default function ArrayTestPage() {
 
   // 初始化：设置数组初始数据
   useEffect(() => {
-    model.onValueChange(["serversMemory"], (value) => {
-      console.log("memory", value);
-    });
-
     // 注册联动规则1：根据IP数量自动调整服务器数组项数
     model.effect((value, commands, cause) => {
       const ipAddresses = value.ipAddresses();
@@ -491,9 +487,9 @@ export default function ArrayTestPage() {
 
     // 注册联动规则5：当虚拟字段 serversMemory 变化时，同步到 servers 和 servers2
     model.effect((value, commands, cause) => {
-      const total = value.serversMemory() || {};
-
-      console.log(total);
+      const total = value.serversMemory({
+        raw: true,
+      });
 
       // 获取 servers 和 servers2 的当前值（不作为依赖项）
       const currentServers = commands.getValue(["servers"]) || {};

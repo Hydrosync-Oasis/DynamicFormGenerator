@@ -12,6 +12,10 @@ const pages = [
   { href: "/perf-array", label: "perf-array" },
   { href: "/test-dirty-api", label: "test-dirty-api" },
   { href: "/test-dirty-include-rule", label: "test-dirty-include-rule" },
+  {
+    href: "/test-pre-init-array-object",
+    label: "test-pre-init-array-object",
+  },
   { href: "/on-dirty-change-test", label: "onDirtyChange 函数测试" },
   { href: "/test-include-policy", label: "test-include-policy" },
   { href: "/validation-demo", label: "validation-demo" },

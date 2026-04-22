@@ -25,6 +25,7 @@ import {
   InitialValueObject,
   AnyMutableFieldNode,
   ValueProxy,
+  GetValueOption,
 } from "./type";
 import {
   compileArrayMutableNode,
@@ -41,6 +42,7 @@ import {
   setNodeHasValue,
   setNodeValue,
 } from "./nodeValueGetterHelper";
+import { ValueOptions } from "postcss/lib/container";
 
 interface FormSchema {
   fields: FieldSchema[];
@@ -135,7 +137,7 @@ class FormModel {
   private listeners = new Set<() => void>();
 
   public formCommands: FormCommands = {
-    getValue: (path: FieldPath) => this.get(path, "value"),
+    getValue: (path: FieldPath) => this.get(path, "rawValue"),
     setValue: (
       path: FieldPath,
       values: Record<string, any>,
@@ -182,8 +184,6 @@ class FormModel {
       cache: {
         plainObj: {
           type: "dirty",
-          validateData: undefined,
-          submitData: undefined,
         },
         validator: "dirty",
         selfDirty: false,
@@ -287,23 +287,30 @@ class FormModel {
     return () => this.subscribeManager.unsubscribe(path, "dirty", onChange);
   }
 
-  get(path: FieldPath, prop: "value" | "errorMessage" | "visible"): any {
+  get(path: FieldPath, prop: "value" | "rawValue" | "visible"): any {
     const node = this.findNodeByPath(path);
     if (!node) throw new Error("the field is not found: " + path);
+    const eff = FormModel.getEffIncludeValue(node);
 
     if (prop === "value") {
       this.plainCacheManager.rebuild(node);
       if (node.cache.plainObj.type === "dirty") {
-        return {};
+        throw new Error("dirty value");
       } else {
-        return (
-          node.cache.plainObj.type === "ready" &&
-          node.cache.plainObj.validateData
-        );
+        return eff
+          ? node.cache.plainObj.type === "ready" &&
+              node.cache.plainObj.validateData
+          : undefined;
       }
-    } else if (prop === "visible") {
-      const nodes = getNodesOnPath(this.mutableDataSource, path, true);
-      return nodes!.every((n) => n.dynamicProp.visible) ?? false;
+    }
+
+    if (prop === "rawValue") {
+      this.plainCacheManager.rebuild(node);
+      if (node.cache.plainObj.type === "dirty") {
+        throw new Error("dirty value");
+      } else {
+        return node.cache.plainObj.rawData;
+      }
     }
   }
 
@@ -479,9 +486,6 @@ class FormModel {
     keepStrategy?: ValueMergeStrategy,
     shouldNotify: boolean = false,
   ) {
-    if (path[0] === "serversMemory") {
-      debugger;
-    }
     this.setValueInternal(path, values, "user", option, keepStrategy);
     if (shouldNotify) {
       this.notify();
@@ -680,7 +684,7 @@ class FormModel {
             const childValue = objValue[key];
             return compileArrayMutableNode(
               childValue,
-              { ...node.staticProp.schema, key },
+              { ...node.staticProp.arraySchema, key },
               node.path.concat(key),
               // 在node下新增数组
               node.rootArrayField || node,
@@ -961,7 +965,7 @@ class FormModel {
     if (initial && initial?.type !== "array") {
       throw new Error("type is incompitable");
     }
-    const schema = field.staticProp.schema;
+    const schema = field.staticProp.arraySchema;
 
     const newNodes: AnyMutableFieldNode[] = Object.entries(value).map(
       ([k, v]) => {
@@ -1109,14 +1113,14 @@ class FormModel {
 
   private buildPathProxy<T>(
     path: FieldPath,
-    invokeNotify?: (path: FieldPath) => void,
-    returnValue?: (path: FieldPath, args: any[]) => T,
+    invokeNotify?: (path: FieldPath, args?: GetValueOption) => void,
+    returnValue?: (path: FieldPath, args?: GetValueOption) => T,
   ): ValueProxy {
-    return new Proxy(() => path, {
+    return new Proxy((option?: GetValueOption) => path, {
       apply(target, _this, args) {
         const path = target();
-        invokeNotify?.(path);
-        return returnValue ? returnValue(path, args) : path;
+        invokeNotify?.(path, args[0]);
+        return returnValue ? returnValue(path, args[0]) : path;
       },
       get: (target, key: string) => {
         return this.buildPathProxy(
@@ -1131,12 +1135,12 @@ class FormModel {
   /** 注册规则 */
   effect(effectFn: ReactiveEffect) {
     // 自动分析该副作用的依赖
-    const deps: FieldPath[] = [];
+    const deps: [FieldPath, GetValueOption | undefined][] = [];
     effectFn(
       this.buildPathProxy(
         [],
-        (path) => {
-          deps.push(path);
+        (path, option) => {
+          deps.push([path, option ?? undefined]);
         },
         () => undefined,
       ),
@@ -1154,24 +1158,33 @@ class FormModel {
       "dependencies-collecting",
     );
     // 将依赖装入Rule
-    const rule: ReactiveRule = { deps, fn: effectFn };
     const unsubFn: (() => void)[] = [];
     let effSub = this.subscribeManager.subscribeEffect(
       effectFn,
-      this.buildPathProxy([], undefined, (path) => {
-        return this.get(path, "value");
+      this.buildPathProxy([], undefined, (path, option) => {
+        return option?.raw
+          ? this.get(path, "rawValue")
+          : this.get(path, "value");
       }),
       this.formCommands,
     );
     // 建 dep 索引
-    rule.deps.forEach((dep) => {
+    deps.forEach(([path, option]) => {
       const subscriber = () => {
         this.subscribeManager.markAsShouldNotify(effSub);
       };
-      this.subscribeManager.subscribe(dep, "value", subscriber);
+      this.subscribeManager.subscribe(
+        path,
+        (option?.raw ?? false) ? "rawValue" : "value",
+        subscriber,
+      );
       unsubFn.push(() => {
         this.subscribeManager.unsubscribeEffect(effSub);
-        this.subscribeManager.unsubscribe(dep, "value", subscriber);
+        this.subscribeManager.unsubscribe(
+          path,
+          (option?.raw ?? false) ? "rawValue" : "value",
+          subscriber,
+        );
       });
     });
 

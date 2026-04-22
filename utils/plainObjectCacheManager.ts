@@ -1,6 +1,5 @@
 import {
   AnyMutableFieldNode,
-  ComparablePlainObject,
   FieldKey,
   FieldType,
   MutableFieldNode,
@@ -62,12 +61,12 @@ class PlainObjectCacheManager {
         // 更新缓存
         if (!include) {
           node.cache.plainObj = {
-            ...node.cache.plainObj,
+            rawData: node.dynamicProp.value,
             type: "void",
           };
         } else {
           node.cache.plainObj = {
-            ...node.cache.plainObj,
+            rawData: node.dynamicProp.value,
             type: "ready",
             validateData: include && node.dynamicProp.value,
             submitData: include && node.dynamicProp.value,
@@ -80,11 +79,14 @@ class PlainObjectCacheManager {
           return node.cache.plainObj;
         }
 
+        const rawObj: Record<string, any> = {};
         const validateObj: Record<string, any> = {};
         const submitObj: Record<string, any> = {};
 
         for (let i of node.children) {
           const result = dfs(i);
+
+          rawObj[i.key] = result.rawData;
 
           if (result.type === "void") {
             continue;
@@ -96,12 +98,14 @@ class PlainObjectCacheManager {
 
         if (include) {
           node.cache.plainObj = {
+            rawData: rawObj,
             submitData: submitObj,
             validateData: validateObj,
             type: "ready",
           };
         } else {
           node.cache.plainObj = {
+            rawData: rawObj,
             type: "void",
           };
         }
@@ -112,12 +116,7 @@ class PlainObjectCacheManager {
           return node.cache.plainObj;
         }
 
-        if (!node.dynamicProp.include) {
-          return (node.cache.plainObj = {
-            type: "void",
-          });
-        }
-
+        const rawObj: Record<FieldKey, any> = {};
         const validateObj: Record<FieldKey, any> = {};
         const submitObj: Record<FieldKey, any> = {};
 
@@ -125,7 +124,12 @@ class PlainObjectCacheManager {
         for (let i of node.children) {
           const result = dfs(i);
 
+          rawObj[i.key] = result.rawData;
+
           if (result.type === "void") {
+            if (!node.dynamicProp.include) {
+              continue;
+            }
             throw new Error("数组第一层节点不能是空");
           }
 
@@ -133,11 +137,19 @@ class PlainObjectCacheManager {
           submitObj[i.key] = result.submitData;
         }
 
+        if (!node.dynamicProp.include) {
+          return (node.cache.plainObj = {
+            rawData: rawObj,
+            type: "void",
+          });
+        }
+
         const submitData = node.children
           .filter((child) => Object.hasOwn(submitObj, child.key))
           .map((child) => submitObj[child.key]);
 
         node.cache.plainObj = {
+          rawData: rawObj,
           submitData,
           validateData: validateObj,
           type: "ready",

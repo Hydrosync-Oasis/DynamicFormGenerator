@@ -19,6 +19,7 @@ export const ValueTypeOfProps = {
   dirty: "immediate",
   touch: "lazy",
   value: "lazy",
+  rawValue: "lazy",
   error: "immediate",
   effect: "void",
 } as const;
@@ -53,18 +54,21 @@ export type SubscribePropCurrentObject<K extends SubscribeTopic> =
         })
   | undefined;
 
-export type SubscribePropValueType<T extends SubscribeTopic> = T extends "value"
-  ?
-      | {
-          hasValue: true;
-          value: any;
-        }
-      | {
-          hasValue: false;
-        }
-  : T extends "effect"
-    ? void
-    : boolean;
+export type SubscribePropValueType<T extends SubscribeTopic> =
+  T extends "rawValue"
+    ? any
+    : T extends "value"
+      ?
+          | {
+              hasValue: true;
+              value: any;
+            }
+          | {
+              hasValue: false;
+            }
+      : T extends "effect"
+        ? void
+        : boolean;
 
 export type NotifiableNode = EffectNode | SubscribeNode;
 

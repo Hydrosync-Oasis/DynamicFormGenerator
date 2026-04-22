@@ -64,7 +64,7 @@ export interface ReactiveRule {
 
 export type ValueProxy = {
   [key in string]: ValueProxy;
-} & (() => any);
+} & ((option?: GetValueOption) => any);
 
 export type GetValueOption = {
   raw?: boolean;
@@ -278,38 +278,22 @@ type MutableFieldNodeBaseType<type extends FieldType> = {
   cache: NodeCache;
 };
 
-export type ComparablePlainObject<T extends FieldType> = T extends "field"
-  ?
-      | {
-          include: false;
-        }
-      | { include: true; value: any }
-  : T extends "object"
-    ? { include: boolean }
-    :
-        | { include: true; order: FieldKey[] }
-        | {
-            include: false;
-          };
-
 export type NodeCache = {
   /** 存储表单提交后导出的普通对象的缓存 */
   plainObj:
     | {
+        rawData: Record<string, any> | undefined;
         validateData: Record<string, any> | undefined;
         submitData: Record<string, any> | undefined;
         type: "ready";
       }
     | {
-        validateData: Record<string, any> | undefined;
-        submitData: Record<string, any> | undefined;
+        // 脏
         type: "dirty";
       }
     | {
-        // 完全新的节点，没值
-        type: "dirty";
-      }
-    | {
+        // 包括include=false的节点
+        rawData: Record<string, any> | undefined;
         type: "void";
       };
   // dirty代表不知道有哪些规则集，必须遍历所有子节点收集规则集
@@ -353,7 +337,7 @@ export type MutableFieldNode<T extends FieldType> = T extends "field"
         dynamicProp: NestedFieldDynamicProp;
         staticProp: {
           /** 定义了数组单个元素的结构体 */
-          schema: ArraySchema;
+          arraySchema: ArraySchema;
           LayoutComponent?: React.ElementType<{
             render: (state: ImmutableFormState) => React.ReactNode;
             state: ImmutableFormState;
@@ -419,7 +403,7 @@ export type InitialValueObject =
   | {
       type: "array";
       key: string;
-      schema: ArraySchema;
+      arraySchema: ArraySchema;
       children: InitialValueObject[];
       include: boolean;
     };

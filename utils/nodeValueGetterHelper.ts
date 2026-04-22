@@ -25,6 +25,25 @@ export function setNodeHasValue(
   });
 }
 
+export function setNodeRawValue(
+  field: AnyMutableFieldNode,
+  subManager: SubscribeManager,
+  subNode: SubscribeNode,
+  plainCacheManager: PlainObjectCacheManager,
+) {
+  subManager.setNewValue(subNode, "rawValue", {
+    valueGetter: () => {
+      plainCacheManager.rebuild(field);
+      if (field.cache.plainObj.type === "dirty") {
+        throw new Error("dirty value");
+      }
+
+      const newValue = field.cache.plainObj.rawData;
+      return newValue;
+    },
+  });
+}
+
 export function setNodeValue(
   field: AnyMutableFieldNode,
   subManager: SubscribeManager,
@@ -32,6 +51,8 @@ export function setNodeValue(
   plainCacheManager: PlainObjectCacheManager,
   effectiveInclude: boolean,
 ) {
+  setNodeRawValue(field, subManager, subNode, plainCacheManager);
+
   if (!effectiveInclude) {
     setNodeHasNoValue(subManager, subNode);
     return;

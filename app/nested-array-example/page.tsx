@@ -567,10 +567,9 @@ export default function NestedArrayExamplePage() {
     });
 
     // 注册联动规则示例：根据职位自动调整薪资范围
-    // 注意：数组内部字段不支持 track，需要 track 整个数组字段
-    const stop = model.effect((ctx) => {
+    const stop = model.effect((value, ctx) => {
       // track 整个 departments 数组（不能 track 数组内部的字段）
-      const departments = ctx.track(["departments"]);
+      const departments = value.departments();
 
       if (typeof departments === "object" && departments !== null) {
         for (const deptKey in departments) {
@@ -607,6 +606,9 @@ export default function NestedArrayExamplePage() {
     });
 
     model.initial();
+    console.log(model);
+
+    return stop;
   }, [model, form]);
 
   // 展示字段顺序

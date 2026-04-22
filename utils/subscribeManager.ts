@@ -91,7 +91,7 @@ export class SubscribeManager {
       return false;
     }
 
-    return oldValue === currentValue;
+    return Object.is(oldValue, currentValue);
   }
 
   private createInitialTopicValue(topic: SubscribeTopic, fallback?: any) {
