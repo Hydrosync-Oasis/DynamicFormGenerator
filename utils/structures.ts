@@ -423,43 +423,75 @@ class FormModel {
    * @param include 新的 include 值
    */
   private updateNodeIncludeState(node: AnyMutableFieldNode, include: boolean) {
-    // 如果是true，仍有可能设置整条链，不能省略
-    if (node.dynamicProp.include === include && include === false) {
-      return;
-    }
+    const cannotSkipNode = new Set<AnyMutableFieldNode>([node]);
+    let lastField = node;
+
     node.dynamicProp.include = include;
     if (include === false) {
       // 需要处理removeWhen字段
-      let cur = node.parent;
-      while (cur) {
-        const condition =
-          cur.dynamicProp.removeWhenNoChildren && cur.dynamicProp.include;
-        if (condition) {
-          const count = cur.children.filter(
-            (x) => x.dynamicProp.include,
-          ).length;
-          if (count === 0) {
-            cur.dynamicProp.include = false;
-          }
-        } else {
-          break;
-        }
+      let cur: AnyMutableFieldNode | undefined = node;
+      while (
+        cur &&
+        (cur.type === "field" ||
+          (cur.dynamicProp.removeWhenNoChildren &&
+            cur.dynamicProp.include &&
+            cur.children.every((x) => !x.dynamicProp.include)))
+      ) {
+        cur.dynamicProp.include = false;
+        cannotSkipNode.add(cur);
+        lastField = cur;
         cur = cur.parent;
       }
     } else {
       // 需要设置整条链
-      let cur = node.parent;
+      let cur: AnyMutableFieldNode | undefined = node;
       while (cur) {
-        cur.dynamicProp.include = true;
+        if (cur.dynamicProp.include === false) {
+          cur.dynamicProp.include = true;
+          lastField = cur;
+        }
 
         cur = cur.parent;
       }
     }
 
-    // 所有的update都是顺着祖先链，所以只需要更新当前节点
-    this.validatorCacheManager.updateNode(node);
+    let lastPath = lastField.path.slice(1);
+    let lastSub = this.subscribeManager.findNode(lastPath);
+
     this.plainCacheManager.updateNode(node);
+    this.validatorCacheManager.updateNode(node);
     this.dirtyManager.updateNode(node);
+    debugger;
+    this.dirtyManager.updateDirtyOnChain(lastPath, (sub, field, dirty, eff) => {
+      sub && this.subscribeManager.setNewValue(sub, "dirty", dirty);
+      sub &&
+        setNodeValue(
+          field,
+          this.subscribeManager,
+          sub,
+          this.plainCacheManager,
+          eff,
+        );
+    });
+    DirtyManager.notifyIncludeChangedSubtree(
+      lastField,
+      lastSub,
+      this.dirtyManager.findInitialValue(lastPath) ?? null,
+      FormModel.getEffIncludeValue(lastField),
+      this.dirtyManager.getEffIncludeValue(lastPath),
+      cannotSkipNode,
+      (field, sub, dirty, eff) => {
+        sub && this.subscribeManager.setNewValue(sub, "dirty", dirty);
+        sub &&
+          setNodeValue(
+            field,
+            this.subscribeManager,
+            sub,
+            this.plainCacheManager,
+            eff,
+          );
+      },
+    );
   }
 
   setInclude(path: FieldPath, include: boolean) {

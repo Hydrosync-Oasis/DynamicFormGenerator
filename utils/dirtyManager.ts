@@ -13,6 +13,7 @@ import {
   MutableFieldNode,
   MutableNestedFieldNode,
 } from "./type";
+import { fi } from "zod/locales";
 
 /**
  * 比较两个节点在shape上是否一致，获取的dirty值是忽略祖先节点的include属性影响的
@@ -71,13 +72,13 @@ export function compareNodeDirty(
 
 // 提交的数据和初始数据是否深比较相等
 export class DirtyManager {
-  currentValue: AnyMutableFieldNode;
+  currentValue: MutableNestedFieldNode;
   initialValue: InitialValueObject;
 
   subscribeManager: SubscribeManager;
 
   constructor(
-    currentValue: AnyMutableFieldNode,
+    currentValue: MutableNestedFieldNode,
     subscribeManager: SubscribeManager,
   ) {
     this.currentValue = currentValue;
@@ -90,7 +91,10 @@ export class DirtyManager {
    * @returns
    */
   private getInitInitialValue() {
-    const dfs = (current: AnyMutableFieldNode): InitialValueObject => {
+    const dfs = (
+      current: AnyMutableFieldNode,
+      parent: InitialValueObject | undefined,
+    ): InitialValueObject => {
       const key = current.key;
       const include = current.dynamicProp.include;
       if (current.type === "field") {
@@ -99,30 +103,37 @@ export class DirtyManager {
           key,
           value: current.dynamicProp.value,
           include,
+          parent: parent,
         };
       }
       if (current.type === "object") {
-        return {
+        const pa: InitialValueObject = {
           type: "object",
           key,
           include,
-          children: current.children.map((x) => dfs(x)),
+          children: [],
+          parent: parent,
         };
+        pa.children = current.children.map((x) => dfs(x, pa));
+        return pa;
       }
       if (current.type === "array") {
-        return {
+        const pa: InitialValueObject = {
           type: "array",
           key,
           arraySchema: current.staticProp.arraySchema,
           include,
-          children: current.children.map((x) => dfs(x)),
+          children: [],
+          parent: parent,
         };
+        pa.children = current.children.map((x) => dfs(x, pa));
+        return pa;
       }
 
       throw new Error("type is invalid");
     };
 
-    return dfs(this.currentValue);
+    return dfs(this.currentValue, undefined);
   }
 
   /**
@@ -275,11 +286,21 @@ export class DirtyManager {
         let childDirty = false;
         if (fieldValue.hasValue) {
           // 目前先全量编译
-          const newChildren = this.compileArrayValueToInitial(
-            fieldValue.value,
-            initial.arraySchema,
-          );
-          initial.children = newChildren.children;
+          const children: InitialValueObject[] = [];
+          Object.entries(fieldValue.value).forEach(([key, value]) => {
+            children.push(
+              this.compileArrayValueToInitial(
+                value,
+                {
+                  key: key,
+                  ...initial.arraySchema,
+                },
+                initial,
+              ),
+            );
+          });
+          initial.children = children;
+
           // 替换为新initialValue
           for (let item of initial.children) {
             const currentChild = current?.children.find(
@@ -416,6 +437,69 @@ export class DirtyManager {
     }
   }
 
+  /**
+   * 在 include 状态变化后，触发子树的节点dirty和value通知。需要保证selfDirty已计算
+   *
+   * 计算规则：
+   * 1. 仅递归当前 include=true 且不等于 skipNode 的子节点。
+   *    include=false 的分支不会继续下钻。
+   * 2. 对外通知的 dirty 为：
+   *    (currentEffInclude && selfDirty) || (currentEffInclude !== initialEffInclude)
+   *
+   * @param field 当前要处理的可变节点
+   * @param subNode 当前节点对应的订阅节点（可能不存在）
+   * @param initialNode 当前节点在初始值树中的对应节点；不存在时传 null
+   * @param currentEffInclude 当前值树中，从根到该节点聚合后的 effective include
+   * @param initialEffInclude 初始值树中，从根到该节点聚合后的 effective include
+   * @param notifyNode 每个节点计算完成后触发的通知回调
+   */
+  static notifyIncludeChangedSubtree = (
+    field: AnyMutableFieldNode,
+    subNode: SubscribeNode | undefined,
+    initialNode: InitialValueObject | null,
+    currentEffInclude: boolean,
+    initialEffInclude: boolean,
+    cannotSkipNode: Set<AnyMutableFieldNode> | undefined,
+    notifyNode: (
+      field: AnyMutableFieldNode,
+      sub: SubscribeNode | undefined,
+      dirty: boolean,
+      effectiveInclude: boolean,
+    ) => void,
+  ) => {
+    if (field.type !== "field") {
+      if (initialNode && initialNode.type === "field") {
+        throw new Error("shape is incompitable");
+      }
+
+      for (const child of field.children) {
+        if (!child.dynamicProp.include && !cannotSkipNode?.has(child)) {
+          continue;
+        }
+
+        const childInitial =
+          initialNode?.children.find((x) => x.key === child.key) ?? null;
+
+        DirtyManager.notifyIncludeChangedSubtree(
+          child,
+          subNode?.children?.get(child.key),
+          childInitial,
+          currentEffInclude && child.dynamicProp.include,
+          initialEffInclude && (childInitial?.include ?? false),
+          cannotSkipNode,
+          notifyNode,
+        );
+      }
+    }
+
+    notifyNode(
+      field,
+      subNode,
+      (currentEffInclude && field.cache.selfDirty) ||
+        currentEffInclude !== initialEffInclude,
+      currentEffInclude,
+    );
+  };
   /**
    * 将表单指定字段恢复到初始值
    * @param node 要恢复的字段节点
@@ -574,50 +658,9 @@ export class DirtyManager {
       });
     };
 
-    const notifyIncludeChangedSubtree = (
-      field: AnyMutableFieldNode,
-      subNode: SubscribeNode | undefined,
-      initialNode: InitialValueObject | null,
-      currentEffInclude: boolean,
-      initialEffInclude: boolean,
-    ) => {
-      if (field.type !== "field") {
-        if (initialNode && initialNode.type === "field") {
-          throw new Error("shape is incompitable");
-        }
-
-        for (const child of field.children) {
-          if (!child.dynamicProp.include) {
-            continue;
-          }
-
-          const childInitial =
-            initialNode?.children.find((x) => x.key === child.key) ?? null;
-
-          notifyIncludeChangedSubtree(
-            child,
-            subNode?.children?.get(child.key),
-            childInitial,
-            currentEffInclude && child.dynamicProp.include,
-            initialEffInclude && (childInitial?.include ?? false),
-          );
-        }
-      }
-
-      field.cache.selfDirty = compareNodeDirty(field, initialNode);
-      notifyNode(
-        field,
-        subNode,
-        (currentEffInclude && field.cache.selfDirty) ||
-          currentEffInclude !== initialEffInclude,
-        currentEffInclude,
-      );
-    };
-
     try {
       const initialValues = this.getInitialValueChainByPath(path);
       const initialValue = initialValues.at(-1)!;
-      const parentInitial = initialValues.at(-2);
       const subNode = this.subscribeManager.findNode(node.path.slice(1));
 
       // 获取初始值里这个节点的effective include
@@ -626,36 +669,57 @@ export class DirtyManager {
       if (effectiveInclude) {
         // 如果effective include是true，把整条链的节点都改成include: true
         let currentField: AnyMutableFieldNode | undefined = node;
+        let currentInitial: InitialValueObject | undefined = initialValue;
         let currentSub: SubscribeNode | undefined = subNode;
+
+        let lastModifedField: AnyMutableFieldNode = node;
+        let lastModifedSub = subNode;
+        let lastModifedInitial = initialValue;
         while (currentField) {
           if (!currentField.dynamicProp.include) {
             currentField.dynamicProp.include = true;
 
-            const currentPath = currentField.path.slice(1);
-            const initialNode = this.findInitialValue(currentPath) ?? null;
-            notifyIncludeChangedSubtree(
+            currentField.cache.selfDirty = compareNodeDirty(
               currentField,
-              currentSub,
-              initialNode,
-              FormModel.getEffIncludeValue(currentField),
-              this.getEffIncludeValue(currentPath),
+              currentInitial ?? null,
             );
+
+            lastModifedField = currentField;
+            lastModifedSub = currentSub;
+            lastModifedInitial = currentInitial!;
           }
 
           currentField = currentField.parent;
           currentSub = currentSub?.parent;
+          currentInitial = currentInitial?.parent;
         }
+
+        // 从最靠近根部的节点开始遍历整棵树
+        // 该函数在遇到false会跳过，而当前只会把false一律设置为true
+        // 所以不需要考虑设置为false导致的漏通知问题
+        DirtyManager.notifyIncludeChangedSubtree(
+          lastModifedField,
+          lastModifedSub,
+          lastModifedInitial,
+          FormModel.getEffIncludeValue(lastModifedField),
+          this.getEffIncludeValue(lastModifedField.path.slice(1)),
+          undefined,
+          notifyNode,
+        );
       } else {
         // 否则只改变当前node的include为false
         if (node.dynamicProp.include) {
           node.dynamicProp.include = false;
+          node.cache.selfDirty = compareNodeDirty(node, initialValue);
 
-          notifyIncludeChangedSubtree(
+          DirtyManager.notifyIncludeChangedSubtree(
             node,
             subNode,
             this.findInitialValue(path) ?? null,
             FormModel.getEffIncludeValue(node),
             this.getEffIncludeValue(path),
+            undefined,
+            notifyNode,
           );
         }
       }
@@ -830,8 +894,9 @@ export class DirtyManager {
    */
   private compileArrayValueToInitial(
     value: any,
-    schema: ArraySchema,
-  ): InitialValueObject & { type: "array" } {
+    schema: FieldSchema,
+    parent: InitialValueObject,
+  ): InitialValueObject {
     const dfs = (
       schema: FieldSchema,
       fieldValueStatus:
@@ -842,6 +907,7 @@ export class DirtyManager {
             hasValue: true;
             value: any;
           },
+      parent: InitialValueObject | undefined,
     ): InitialValueObject => {
       if (!("isArray" in schema)) {
         return {
@@ -849,39 +915,49 @@ export class DirtyManager {
           key: schema.key,
           include: fieldValueStatus.hasValue,
           value: fieldValueStatus.hasValue && fieldValueStatus.value,
+          parent: parent,
         };
       }
 
       if (schema.isArray === false) {
         // 对象
         const children: InitialValueObject[] = [];
-        for (let item of schema.childrenFields) {
-          children.push(
-            dfs(item, {
-              hasValue:
-                fieldValueStatus.hasValue && item.key in fieldValueStatus.value,
-              value:
-                fieldValueStatus.hasValue && fieldValueStatus.value[item.key],
-            }),
-          );
-        }
-        return {
+        const res: InitialValueObject = {
           type: "object",
           key: schema.key,
           include: fieldValueStatus.hasValue,
           children,
+          parent: parent,
         };
+        for (let item of schema.childrenFields) {
+          children.push(
+            dfs(
+              item,
+              {
+                hasValue:
+                  fieldValueStatus.hasValue &&
+                  item.key in fieldValueStatus.value,
+                value:
+                  fieldValueStatus.hasValue && fieldValueStatus.value[item.key],
+              },
+              res,
+            ),
+          );
+        }
+        return res;
       } else {
         // 数组
         const children: InitialValueObject[] = [];
+        const res: InitialValueObject = {
+          type: "array",
+          key: schema.key,
+          arraySchema: schema.arraySchema,
+          include: false,
+          children: children,
+          parent: parent,
+        };
         if (!fieldValueStatus.hasValue) {
-          return {
-            type: "array",
-            key: schema.key,
-            arraySchema: schema.arraySchema,
-            include: false,
-            children: [],
-          };
+          return res;
         }
         for (let item in fieldValueStatus.value) {
           const child = dfs(
@@ -890,25 +966,15 @@ export class DirtyManager {
               hasValue: true,
               value: fieldValueStatus.value[item],
             },
+            res,
           );
           children.push(child);
         }
-        return {
-          type: "array",
-          key: schema.key,
-          arraySchema: schema.arraySchema,
-          children: children,
-          include: true,
-        };
+        return res;
       }
     };
 
-    return dfs(
-      { key: "dummy", isArray: true, arraySchema: schema },
-      { hasValue: true, value },
-    ) as InitialValueObject & {
-      type: "array";
-    };
+    return dfs(schema, { hasValue: true, value }, parent);
   }
 
   /**
@@ -999,6 +1065,33 @@ export class DirtyManager {
 
       current = child;
       chain.push(current); // 添加路径上的每个节点
+    }
+
+    return chain;
+  }
+
+  /**
+   * 根据路径获取链路节点（安全版，不抛错）
+   * @param path 字段路径
+   * @returns 返回长度与 path 一致；每一项对应 path 同索引 key 的节点，找不到返回 null
+   */
+  public getInitialValueChainByPathSafe(
+    path: FieldPath,
+  ): (InitialValueObject | null)[] {
+    const chain: (InitialValueObject | null)[] = [];
+    let current: InitialValueObject | null = this.initialValue;
+
+    for (const key of path) {
+      if (!current || current.type === "field") {
+        chain.push(null);
+        current = null;
+        continue;
+      }
+
+      const child: InitialValueObject | null =
+        current.children.find((x) => x.key === key) ?? null;
+      chain.push(child);
+      current = child;
     }
 
     return chain;

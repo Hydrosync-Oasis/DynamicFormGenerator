@@ -1,506 +1,572 @@
 "use client";
 
-import { Generator, useDynamicForm } from "@/utils/generator";
-import { FormModel, FormSchema } from "@/utils/structures";
-import { Button, Card, message, Space } from "antd";
-import { useEffect, useRef } from "react";
-import z from "zod";
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Divider, Space, Tag, Typography } from "antd";
+import { z } from "zod";
+import { Generator } from "@/utils/generator";
+import { FieldPath, FieldSchema, FormModel } from "@/utils/structures";
 
-const schema: FormSchema = {
-  fields: [
-    {
-      key: "obj",
-      isArray: false,
-      initialVisible: true,
-      removeWhenNoChildren: true,
-      childrenFields: [
+type ListenerType = "value" | "dirty";
+type ScenarioKey = "target" | "layer3" | "layer2";
+
+type NotifyLog = {
+  ts: number;
+  listener: ListenerType;
+  path: string;
+  payload: unknown;
+};
+
+const ROOT_PATH: FieldPath = [];
+const L1_PATH: FieldPath = ["layer1"];
+const L2_PATH: FieldPath = ["layer1", "layer2"];
+const L3_PATH: FieldPath = ["layer1", "layer2", "layer3"];
+const TARGET_PATH: FieldPath = ["layer1", "layer2", "layer3", "target"];
+const L2_SIBLING_PATH: FieldPath = ["layer1", "layer2", "l2Sibling"];
+const L1_SIBLING_PATH: FieldPath = ["layer1", "l1Sibling"];
+const PEER_PATH: FieldPath = ["peer"];
+
+const watchedPaths: { path: FieldPath; label: string }[] = [
+  { path: ROOT_PATH, label: "(root)" },
+  { path: L1_PATH, label: "layer1" },
+  { path: L2_PATH, label: "layer1.layer2" },
+  { path: L3_PATH, label: "layer1.layer2.layer3" },
+  { path: TARGET_PATH, label: "layer1.layer2.layer3.target" },
+  { path: L2_SIBLING_PATH, label: "layer1.layer2.l2Sibling" },
+  { path: L1_SIBLING_PATH, label: "layer1.l1Sibling" },
+  { path: PEER_PATH, label: "peer" },
+];
+
+const pathToKey = (path: FieldPath) =>
+  path.length === 0 ? "(root)" : path.join(".");
+
+const getHasValue = (payload: unknown): boolean | null => {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "hasValue" in payload &&
+    typeof (payload as { hasValue?: unknown }).hasValue === "boolean"
+  ) {
+    return (payload as { hasValue: boolean }).hasValue;
+  }
+  return null;
+};
+
+const getBooleanPayload = (payload: unknown): boolean | null => {
+  return typeof payload === "boolean" ? payload : null;
+};
+
+export default function TestIncludePolicyPage() {
+  const schema = useMemo(
+    () => ({
+      fields: [
         {
-          key: "test1",
-          label: "测试字段1",
-          control: "input",
-          initialVisible: true,
-          defaultValue: "3",
-          validate: z.string().min(1, "最少1个字符"),
-        },
-        {
-          key: "test2",
-          label: "测试字段2",
-          control: "input",
-          initialVisible: true,
-          defaultValue: "1",
-          validate: z.string().min(1, "最少1个字符"),
-        },
-        {
-          key: "test3",
-          label: "测试字段3",
-          control: "input",
-          initialVisible: true,
-          defaultValue: "test3_value",
-          validate: z.string().min(1, "最少1个字符"),
-        },
-        {
-          key: "nested",
+          key: "layer1",
           isArray: false,
-          initialVisible: true,
-          removeWhenNoChildren: false,
           childrenFields: [
             {
-              key: "nested1",
-              label: "嵌套字段1 (nested: removeWhenNoChildren=false)",
-              control: "input",
-              initialVisible: true,
-              defaultValue: "nested1_value",
-              validate: z.string().min(1, "最少1个字符"),
-            },
-            {
-              key: "nested2",
-              label: "嵌套字段2 (nested: removeWhenNoChildren=false)",
-              control: "input",
-              initialVisible: true,
-              defaultValue: "nested2_value",
-              validate: z.string().min(1, "最少1个字符"),
-            },
-            {
-              key: "deepNested",
+              key: "layer2",
               isArray: false,
-              initialVisible: true,
-              removeWhenNoChildren: true,
               childrenFields: [
                 {
-                  key: "deep1",
-                  label: "深层字段1 (deepNested: removeWhenNoChildren=true)",
-                  control: "input",
-                  initialVisible: true,
-                  defaultValue: "deep1_value",
-                  validate: z.string().min(1, "最少1个字符"),
+                  key: "layer3",
+                  isArray: false,
+                  childrenFields: [
+                    {
+                      key: "target",
+                      label: "四层目标字段",
+                      control: "input",
+                      defaultValue: "L4-Init",
+                      validate: z.string().min(1, "target 不能为空"),
+                    },
+                  ],
                 },
                 {
-                  key: "deep2",
-                  label: "深层字段2 (deepNested: removeWhenNoChildren=true)",
+                  key: "l2Sibling",
+                  label: "二层同级字段",
                   control: "input",
-                  initialVisible: true,
-                  defaultValue: "deep2_value",
-                  validate: z.string().min(1, "最少1个字符"),
+                  defaultValue: "L2-Sibling",
+                  validate: z.string().min(1),
                 },
               ],
             },
+            {
+              key: "l1Sibling",
+              label: "一层同级字段",
+              control: "input",
+              defaultValue: "L1-Sibling",
+              validate: z.string().min(1),
+            },
           ],
         },
-      ],
-    },
-  ],
-};
+        {
+          key: "peer",
+          label: "根层同级字段",
+          control: "input",
+          defaultValue: "Peer",
+          validate: z.string().min(1),
+        },
+      ] satisfies FieldSchema[],
+    }),
+    [],
+  );
 
-export default function Page() {
-  const model = useRef(new FormModel(schema));
+  const [model] = useState(() => new FormModel(schema));
+  const [logs, setLogs] = useState<NotifyLog[]>([]);
+  const [activeScenario, setActiveScenario] = useState<ScenarioKey>("target");
+
   useEffect(() => {
-    model.current.initial();
-  }, []);
-  const form = useDynamicForm(model.current);
+    model.initial();
+
+    const unsubs: Array<() => void> = [];
+
+    const appendLog = (
+      listener: ListenerType,
+      path: FieldPath,
+      payload: unknown,
+    ) => {
+      setLogs((prev) =>
+        [
+          {
+            ts: Date.now(),
+            listener,
+            path: pathToKey(path),
+            payload,
+          },
+          ...prev,
+        ].slice(0, 200),
+      );
+    };
+
+    for (const item of watchedPaths) {
+      unsubs.push(
+        model.onValueChange(item.path, (value) => {
+          appendLog("value", item.path, value);
+        }),
+      );
+
+      unsubs.push(
+        model.onDirtyChange(item.path, (dirty) => {
+          appendLog("dirty", item.path, dirty);
+        }),
+      );
+    }
+
+    console.log(model);
+
+    return () => {
+      unsubs.forEach((fn) => fn());
+    };
+  }, [model]);
+
+  const flushIncludeNotifications = () => {
+    // setInclude 内部会写入订阅队列，这里用一次“无变更 setValue”触发队列消费。
+    model.setValue([], {}, { invokeEffect: false }, "merge", false);
+  };
+
+  const setNodeInclude = (path: FieldPath, include: boolean) => {
+    model.setInclude(path, include);
+    flushIncludeNotifications();
+  };
+
+  const runTargetScenario = () => {
+    setActiveScenario("target");
+    model.resetField(undefined, true);
+    setLogs([]);
+
+    setNodeInclude(TARGET_PATH, false);
+    setNodeInclude(TARGET_PATH, true);
+  };
+
+  const runLayer3Scenario = () => {
+    setActiveScenario("layer3");
+    model.resetField(undefined, true);
+
+    // 预置：先让 target=false，确保 layer3 可以单独切换 false/true。
+    setNodeInclude(TARGET_PATH, false);
+    setNodeInclude(L3_PATH, true);
+
+    // 将当前状态作为初始基线，便于观察 layer3 切换带来的 dirty 通知。
+    model.setCurrentAsInitialValue([], false);
+    setLogs([]);
+
+    setNodeInclude(L3_PATH, false);
+    setNodeInclude(L3_PATH, true);
+  };
+
+  const runLayer2Scenario = () => {
+    setActiveScenario("layer2");
+    model.resetField(undefined, true);
+
+    // 预置：先将 layer2 的子节点都置为 false，再测试 layer2 的 include 切换。
+    setNodeInclude(TARGET_PATH, false);
+    setNodeInclude(L2_SIBLING_PATH, false);
+    setNodeInclude(L2_PATH, true);
+
+    // 将当前状态作为初始基线，便于观察 layer2 切换带来的 dirty 通知。
+    model.setCurrentAsInitialValue([], false);
+    setLogs([]);
+
+    setNodeInclude(L2_PATH, false);
+    setNodeInclude(L2_PATH, true);
+  };
+
+  const counter = useMemo(() => {
+    return logs.reduce<Record<string, number>>((acc, item) => {
+      const key = `${item.listener}:${item.path}`;
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {});
+  }, [logs]);
+
+  const getCount = (listener: ListenerType, path: FieldPath) => {
+    return counter[`${listener}:${pathToKey(path)}`] ?? 0;
+  };
+
+  const countExpectationsByScenario: Record<
+    ScenarioKey,
+    Array<{
+      path: FieldPath;
+      pathLabel: string;
+      expectedValueCount?: number;
+      expectedDirtyCount: number;
+    }>
+  > = {
+    target: [
+      {
+        path: ROOT_PATH,
+        pathLabel: "(root)",
+        expectedValueCount: 2,
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L1_PATH,
+        pathLabel: "layer1",
+        expectedValueCount: 2,
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L2_PATH,
+        pathLabel: "layer1.layer2",
+        expectedValueCount: 2,
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L3_PATH,
+        pathLabel: "layer1.layer2.layer3",
+        expectedValueCount: 2,
+        expectedDirtyCount: 2,
+      },
+      {
+        path: TARGET_PATH,
+        pathLabel: "layer1.layer2.layer3.target",
+        expectedValueCount: 2,
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L2_SIBLING_PATH,
+        pathLabel: "layer1.layer2.l2Sibling",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: L1_SIBLING_PATH,
+        pathLabel: "layer1.l1Sibling",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: PEER_PATH,
+        pathLabel: "peer",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+    ],
+    layer3: [
+      {
+        path: ROOT_PATH,
+        pathLabel: "(root)",
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L1_PATH,
+        pathLabel: "layer1",
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L2_PATH,
+        pathLabel: "layer1.layer2",
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L3_PATH,
+        pathLabel: "layer1.layer2.layer3",
+        expectedDirtyCount: 2,
+      },
+      {
+        path: TARGET_PATH,
+        pathLabel: "layer1.layer2.layer3.target",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: L2_SIBLING_PATH,
+        pathLabel: "layer1.layer2.l2Sibling",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: L1_SIBLING_PATH,
+        pathLabel: "layer1.l1Sibling",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: PEER_PATH,
+        pathLabel: "peer",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+    ],
+    layer2: [
+      {
+        path: ROOT_PATH,
+        pathLabel: "(root)",
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L1_PATH,
+        pathLabel: "layer1",
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L2_PATH,
+        pathLabel: "layer1.layer2",
+        expectedDirtyCount: 2,
+      },
+      {
+        path: L3_PATH,
+        pathLabel: "layer1.layer2.layer3",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: TARGET_PATH,
+        pathLabel: "layer1.layer2.layer3.target",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: L2_SIBLING_PATH,
+        pathLabel: "layer1.layer2.l2Sibling",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: L1_SIBLING_PATH,
+        pathLabel: "layer1.l1Sibling",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+      {
+        path: PEER_PATH,
+        pathLabel: "peer",
+        expectedValueCount: 0,
+        expectedDirtyCount: 0,
+      },
+    ],
+  };
+
+  const countExpectations = countExpectationsByScenario[activeScenario];
+
+  const chronoLogs = useMemo(() => [...logs].reverse(), [logs]);
+
+  const scenarioPath: FieldPath =
+    activeScenario === "target"
+      ? TARGET_PATH
+      : activeScenario === "layer3"
+        ? L3_PATH
+        : L2_PATH;
+
+  const targetValueSequence = chronoLogs
+    .filter((x) => x.listener === "value" && x.path === pathToKey(TARGET_PATH))
+    .map((x) => getHasValue(x.payload));
+
+  const scenarioDirtySequence = chronoLogs
+    .filter((x) => x.listener === "dirty" && x.path === pathToKey(scenarioPath))
+    .map((x) => getBooleanPayload(x.payload));
+
+  const valueSeqExpected = [false, true];
+  const dirtySeqExpected = [true, false];
+
+  const countCheckPassed = countExpectations.every((item) => {
+    const actualValueCount = getCount("value", item.path);
+    const actualDirtyCount = getCount("dirty", item.path);
+    const valueMatched =
+      item.expectedValueCount === undefined ||
+      actualValueCount === item.expectedValueCount;
+    return valueMatched && actualDirtyCount === item.expectedDirtyCount;
+  });
+
+  const valueSeqPassed =
+    targetValueSequence.length === valueSeqExpected.length &&
+    targetValueSequence.every((x, i) => x === valueSeqExpected[i]);
+
+  const dirtySeqPassed =
+    scenarioDirtySequence.length === dirtySeqExpected.length &&
+    scenarioDirtySequence.every((x, i) => x === dirtySeqExpected[i]);
+
+  const overallPassed =
+    countCheckPassed &&
+    dirtySeqPassed &&
+    (activeScenario === "target" ? valueSeqPassed : true);
+
+  const targetNode = model.findNodeByPath(TARGET_PATH);
+  const l3Node = model.findNodeByPath(L3_PATH);
+  const l2SiblingNode = model.findNodeByPath(L2_SIBLING_PATH);
 
   return (
-    <>
-      <Card
-        className="!mx-auto !mt-3 w-5/6"
-        title="测试 setVisible 和 setInclude API (更新版本)"
-        extra={
-          <Space>
-            <Button
-              onClick={() => {
-                console.log(model.current);
-              }}
-            >
-              查看Model
+    <div className="p-6">
+      <Card title="Include 策略测试：四层树的通知联动">
+        <Space direction="vertical" size={12} className="w-full">
+          <Alert
+            type="info"
+            showIcon
+            message="测试目标"
+            description="分别在 target、layer3、layer2 这三个嵌套节点上切换 include，验证它们是否按预期触发其他字段的 dirty/value 通知。"
+          />
+
+          <Alert
+            type="warning"
+            showIcon
+            message="推荐操作"
+            description="先执行目标场景，再执行 layer3、layer2 场景。每个场景都验证：目标链路 dirty 是否 2 次（false 再 true），无关字段是否保持 0 次通知。"
+          />
+
+          <Space wrap>
+            <Button type="primary" onClick={runTargetScenario}>
+              一键执行用例（target include: true → false → true）
             </Button>
-            <Button
-              onClick={async () => {
-                try {
-                  const data = await form.submit();
-                  message.success("提交成功");
-                  console.log("提交的数据:", data);
-                } catch (e) {
-                  console.error(e);
-                  message.error("提交失败");
-                }
-              }}
-              type="primary"
-            >
-              提交表单
+            <Button onClick={runLayer3Scenario}>
+              一键执行用例（layer3 include: true → false → true）
             </Button>
+            <Button onClick={runLayer2Scenario}>
+              一键执行用例（layer2 include: true → false → true）
+            </Button>
+            <Button onClick={() => setNodeInclude(TARGET_PATH, false)}>
+              单步：target include=false
+            </Button>
+            <Button onClick={() => setNodeInclude(TARGET_PATH, true)}>
+              单步：target include=true
+            </Button>
+            <Button onClick={() => setNodeInclude(L3_PATH, false)}>
+              单步：layer3 include=false
+            </Button>
+            <Button onClick={() => setNodeInclude(L3_PATH, true)}>
+              单步：layer3 include=true
+            </Button>
+            <Button onClick={() => setNodeInclude(L2_PATH, false)}>
+              单步：layer2 include=false
+            </Button>
+            <Button onClick={() => setNodeInclude(L2_PATH, true)}>
+              单步：layer2 include=true
+            </Button>
+            <Button onClick={() => model.resetField(undefined, true)}>
+              resetField 全量重置
+            </Button>
+            <Button onClick={() => setLogs([])}>清空日志</Button>
           </Space>
-        }
-      >
-        <Space direction="vertical" size="large" style={{ width: "100%" }}>
-          {/* 控制按钮区域 */}
-          <Card title="setVisible 测试" size="small">
-            <Space wrap>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test1"], true, true, true);
-                  message.info("已显示 test1");
-                }}
-              >
-                显示 test1
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test1"], false, true, true);
-                  message.info("已隐藏 test1");
-                }}
-              >
-                隐藏 test1
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test2"], true, true, true);
-                  message.info("已显示 test2");
-                }}
-              >
-                显示 test2
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test2"], false, true, true);
-                  message.info("已隐藏 test2");
-                }}
-              >
-                隐藏 test2
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test3"], true, true, true);
-                  message.info("已显示 test3");
-                }}
-              >
-                显示 test3
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test3"], false, true, true);
-                  message.info("已隐藏 test3");
-                }}
-              >
-                隐藏 test3
-              </Button>
-            </Space>
-          </Card>
 
-          <Card title="setInclude 测试" size="small">
-            <Space wrap>
-              <Button
-                onClick={() => {
-                  model.current.setInclude(["obj", "test1"], true);
-                  message.info("test1 设为 include=true");
-                }}
-              >
-                test1 → include (true)
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setInclude(["obj", "test1"], false);
-                  message.info("test1 设为 include=false");
-                }}
-              >
-                test1 → exclude (false)
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setInclude(["obj", "test2"], true);
-                  message.info("test2 设为 include=true");
-                }}
-              >
-                test2 → include (true)
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setInclude(["obj", "test2"], false);
-                  message.info("test2 设为 include=false");
-                }}
-              >
-                test2 → exclude (false)
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setInclude(["obj", "test3"], true);
-                  message.info("test3 设为 include=true");
-                }}
-              >
-                test3 → include (true)
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setInclude(["obj", "test3"], false);
-                  message.info("test3 设为 include=false");
-                }}
-              >
-                test3 → exclude (false)
-              </Button>
-            </Space>
-          </Card>
+          <Space wrap>
+            <Tag color={targetNode?.dynamicProp.include ? "blue" : "default"}>
+              target include:{" "}
+              {targetNode?.dynamicProp.include ? "true" : "false"}
+            </Tag>
+            <Tag color={l3Node?.dynamicProp.include ? "blue" : "default"}>
+              layer3 include: {l3Node?.dynamicProp.include ? "true" : "false"}
+            </Tag>
+            <Tag
+              color={l2SiblingNode?.dynamicProp.include ? "blue" : "default"}
+            >
+              l2Sibling include:{" "}
+              {l2SiblingNode?.dynamicProp.include ? "true" : "false"}
+            </Tag>
+            <Tag color={overallPassed ? "green" : "red"}>
+              用例判定: {overallPassed ? "PASS" : "CHECK"}
+            </Tag>
+            <Tag>当前场景: {activeScenario}</Tag>
+            <Tag>日志总数: {logs.length}</Tag>
+          </Space>
 
-          <Card title="组合测试 (include + visible)" size="small">
-            <Space wrap>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test1"], false, true);
-                  model.current.setInclude(["obj", "test1"], true);
-                  message.info("test1: 隐藏 + include=true (应包含在提交中)");
-                }}
-                type="dashed"
-              >
-                test1: 隐藏 + include
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test1"], false, true);
-                  model.current.setInclude(["obj", "test1"], false);
-                  message.info("test1: 隐藏 + include=false (不应包含)");
-                }}
-                type="dashed"
-              >
-                test1: 隐藏 + exclude
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test1"], true, true);
-                  model.current.setInclude(["obj", "test1"], false);
-                  message.info("test1: 显示 + include=false (不应包含)");
-                }}
-                type="dashed"
-              >
-                test1: 显示 + exclude
-              </Button>
-              <Button
-                onClick={() => {
-                  model.current.setVisible(["obj", "test1"], true);
-                  model.current.setVisible(["obj", "test2"], true);
-                  model.current.setVisible(["obj", "test3"], true, true);
-                  model.current.setInclude(["obj", "test1"], true);
-                  model.current.setInclude(["obj", "test2"], true);
-                  model.current.setInclude(["obj", "test3"], true);
-                  message.info("重置: 全部显示 + include=true");
-                }}
-                type="primary"
-              >
-                重置全部
-              </Button>
-            </Space>
-          </Card>
+          <Divider />
 
-          <Card title="removeWhenNoChildren 基础测试" size="small" type="inner">
-            <Space direction="vertical" style={{ width: "100%" }}>
-              <div style={{ color: "#666", fontSize: "12px" }}>
-                obj节点配置了 removeWhenNoChildren=true，
-                当所有子节点都被exclude时，obj也会被自动exclude
-              </div>
-              <Space wrap>
-                <Button
-                  onClick={() => {
-                    model.current.setInclude(["obj", "test1"], false);
-                    model.current.setInclude(["obj", "test2"], false);
-                    model.current.setInclude(["obj", "test3"], false);
-                    model.current.setInclude(["obj", "nested"], false);
-                    message.warning(
-                      "所有子节点已exclude，检查提交数据应该没有obj字段",
-                    );
-                  }}
-                  danger
-                >
-                  Exclude 所有子节点
-                </Button>
-                <Button
-                  onClick={() => {
-                    model.current.setInclude(["obj", "test1"], false);
-                    model.current.setInclude(["obj", "test2"], false);
-                    model.current.setInclude(["obj", "test3"], true);
-                    message.info("仅保留 test3，提交数据应包含 obj.test3");
-                  }}
-                >
-                  只保留 test3
-                </Button>
-                <Button
-                  onClick={() => {
-                    model.current.setInclude(["obj", "test3"], true);
-                    message.info("恢复 test3 为 include，obj应被自动恢复");
-                  }}
-                  type="primary"
-                >
-                  恢复任意子节点 (test3)
-                </Button>
-              </Space>
-            </Space>
-          </Card>
+          <Typography.Text strong>计数断言（期望 vs 实际）</Typography.Text>
+          <Space wrap>
+            {countExpectations.map((item) => {
+              const actualValueCount = getCount("value", item.path);
+              const actualDirtyCount = getCount("dirty", item.path);
+              const pass =
+                (item.expectedValueCount === undefined ||
+                  actualValueCount === item.expectedValueCount) &&
+                actualDirtyCount === item.expectedDirtyCount;
+              return (
+                <Tag key={item.pathLabel} color={pass ? "green" : "red"}>
+                  {item.pathLabel} | value {actualValueCount}/
+                  {item.expectedValueCount ?? "-"} | dirty {actualDirtyCount}/
+                  {item.expectedDirtyCount}
+                </Tag>
+              );
+            })}
+          </Space>
 
-          <Card title="removeWhenNoChildren 混合测试" size="small" type="inner">
-            <Space direction="vertical" style={{ width: "100%" }}>
-              <div
-                style={{ color: "#666", fontSize: "12px", marginBottom: "8px" }}
-              >
-                测试混合配置: obj (removeWhenNoChildren=<strong>true</strong>) →
-                nested (removeWhenNoChildren=<strong>false</strong>) →
-                deepNested (removeWhenNoChildren=<strong>true</strong>)
-              </div>
-              <Space wrap>
-                <Button
-                  onClick={() => {
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep1"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep2"],
-                      false,
-                    );
-                    message.warning(
-                      "Exclude deepNested所有子节点，deepNested应被自动exclude (removeWhenNoChildren=true)",
-                    );
-                  }}
-                  danger
-                >
-                  Exclude deepNested所有子节点
-                </Button>
-                <Button
-                  onClick={() => {
-                    model.current.setInclude(
-                      ["obj", "nested", "nested1"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "nested2"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep1"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep2"],
-                      false,
-                    );
-                    message.warning(
-                      "Exclude nested所有子节点，nested不应被自动exclude (removeWhenNoChildren=false)",
-                    );
-                  }}
-                  danger
-                >
-                  Exclude nested所有子节点 (测试false)
-                </Button>
-                <Button
-                  onClick={() => {
-                    model.current.setInclude(["obj", "test1"], false);
-                    model.current.setInclude(["obj", "test2"], false);
-                    model.current.setInclude(["obj", "test3"], false);
-                    model.current.setInclude(
-                      ["obj", "nested", "nested1"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "nested2"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep1"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep2"],
-                      false,
-                    );
-                    message.error(
-                      "Exclude所有节点，deepNested自动exclude，但nested不会(false)，obj也不会被exclude",
-                    );
-                  }}
-                  danger
-                  type="primary"
-                >
-                  级联测试 (混合配置)
-                </Button>
-              </Space>
-              <Space wrap style={{ marginTop: "8px" }}>
-                <Button
-                  onClick={() => {
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep1"],
-                      true,
-                    );
-                    message.success(
-                      "恢复deep1，应该级联恢复 deepNested→nested→obj",
-                    );
-                  }}
-                  type="primary"
-                >
-                  恢复deep1 (测试级联恢复)
-                </Button>
-                <Button
-                  onClick={() => {
-                    model.current.setInclude(["obj", "test1"], false);
-                    model.current.setInclude(["obj", "test2"], false);
-                    model.current.setInclude(["obj", "test3"], false);
-                    model.current.setInclude(
-                      ["obj", "nested", "nested1"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "nested2"],
-                      false,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep1"],
-                      true,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep2"],
-                      false,
-                    );
-                    message.info(
-                      "只保留deep1，应有obj.nested.deepNested.deep1",
-                    );
-                  }}
-                >
-                  只保留deep1 (其他全exclude)
-                </Button>
-                <Button
-                  onClick={() => {
-                    // model.current.resetFields(undefined, true);
-                    model.current.setInclude(["obj", "test1"], true);
-                    model.current.setInclude(["obj", "test2"], true);
-                    model.current.setInclude(["obj", "test3"], true);
-                    model.current.setInclude(
-                      ["obj", "nested", "nested1"],
-                      true,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "nested2"],
-                      true,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep1"],
-                      true,
-                    );
-                    model.current.setInclude(
-                      ["obj", "nested", "deepNested", "deep2"],
-                      true,
-                    );
-                    message.success("所有字段已恢复");
-                  }}
-                  type="default"
-                >
-                  全部恢复
-                </Button>
-              </Space>
-            </Space>
-          </Card>
+          <Typography.Text strong>关键序列断言（按时间先后）</Typography.Text>
+          <Space wrap>
+            <Tag color={valueSeqPassed ? "green" : "red"}>
+              target value.hasValue: {JSON.stringify(targetValueSequence)} /
+              期望
+              {JSON.stringify(valueSeqExpected)}
+            </Tag>
+            <Tag color={dirtySeqPassed ? "green" : "red"}>
+              {pathToKey(scenarioPath)} dirty:{" "}
+              {JSON.stringify(scenarioDirtySequence)}/ 期望
+              {JSON.stringify(dirtySeqExpected)}
+            </Tag>
+          </Space>
 
-          {/* 表单渲染区域 */}
-          <Card title="表单区域" size="small">
-            <Generator
-              model={model.current}
-              displayFields={[[]]}
-              displayOption={{ showDebug: true }}
-            />
-          </Card>
+          <Divider />
+
+          <Generator
+            model={model}
+            displayFields={[
+              TARGET_PATH,
+              L2_SIBLING_PATH,
+              L1_SIBLING_PATH,
+              PEER_PATH,
+            ]}
+            displayOption={{ showDebug: true }}
+          />
+
+          <Divider />
+
+          <Typography.Text strong>当前提交数据</Typography.Text>
+          <pre className="rounded bg-gray-100 p-3 text-xs leading-5">
+            {JSON.stringify(model.getJSONData(), null, 2)}
+          </pre>
+
+          <Typography.Text strong>通知日志（最新在前）</Typography.Text>
+          <pre className="rounded bg-gray-100 p-3 text-xs leading-5">
+            {JSON.stringify(
+              logs.map((item) => ({
+                at: new Date(item.ts).toLocaleTimeString(),
+                listener: item.listener,
+                path: item.path,
+                payload: item.payload,
+              })),
+              null,
+              2,
+            )}
+          </pre>
         </Space>
       </Card>
-    </>
+    </div>
   );
 }

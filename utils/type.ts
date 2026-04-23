@@ -387,7 +387,9 @@ export type ImmutableFormState =
 
 export type ValueMergeStrategy = "merge" | "replace";
 
-export type InitialValueObject =
+export type InitialValueObject = {
+  parent: InitialValueObject | undefined;
+} & (
   | {
       type: "field";
       key: string;
@@ -406,4 +408,5 @@ export type InitialValueObject =
       arraySchema: ArraySchema;
       children: InitialValueObject[];
       include: boolean;
-    };
+    }
+);
